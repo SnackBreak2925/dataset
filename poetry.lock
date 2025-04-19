@@ -71,6 +71,18 @@ docs = ["Sphinx", "furo"]
 test = ["objgraph", "psutil"]
 
 [[package]]
+name = "html2text"
+version = "2025.4.15"
+description = "Turn HTML into equivalent Markdown-structured text."
+optional = false
+python-versions = ">=3.9"
+groups = ["main"]
+files = [
+    {file = "html2text-2025.4.15-py3-none-any.whl", hash = "sha256:00569167ffdab3d7767a4cdf589b7f57e777a5ed28d12907d8c58769ec734acc"},
+    {file = "html2text-2025.4.15.tar.gz", hash = "sha256:948a645f8f0bc3abe7fd587019a2197a12436cd73d0d4908af95bfc8da337588"},
+]
+
+[[package]]
 name = "numpy"
 version = "2.2.4"
 description = "Fundamental package for array computing in Python"
@@ -250,6 +262,21 @@ files = [
 six = ">=1.5"
 
 [[package]]
+name = "python-dotenv"
+version = "1.1.0"
+description = "Read key-value pairs from a .env file and set them as environment variables"
+optional = false
+python-versions = ">=3.9"
+groups = ["main"]
+files = [
+    {file = "python_dotenv-1.1.0-py3-none-any.whl", hash = "sha256:d7c01d9e2293916c18baf562d95698754b0dbbb5e74d457c45d4f6561fb9d55d"},
+    {file = "python_dotenv-1.1.0.tar.gz", hash = "sha256:41f90bc6f5f177fb41f53e87666db362025010eb28f60a01c9143bfa33a2b2d5"},
+]
+
+[package.extras]
+cli = ["click (>=5.0)"]
+
+[[package]]
 name = "pytz"
 version = "2025.2"
 description = "World timezone definitions, modern and historical"
@@ -396,4 +423,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12"
-content-hash = "c66d459293df1f170403b667ce640014227b78f7495b238cf15a690062566692"
+content-hash = "af1c92c4c7f8421df0fe889c6011e32f1c33235c8680afa87e5839d6a5984426"
