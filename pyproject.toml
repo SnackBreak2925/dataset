@@ -1,18 +1,20 @@
 [project]
-name = "dataset"
+name = "helpdesk_dataset"
 version = "0.1.0"
 description = ""
 authors = [
     {name = "Snack",email = "nurd_galim@mail.ru"}
 ]
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.12,<4.0"
 dependencies = [
     "pandas (>=2.2.3,<3.0.0)",
     "sqlalchemy (>=2.0.40,<3.0.0)",
     "pymysql (>=1.1.1,<2.0.0)",
     "html2text (>=2025.4.15,<2026.0.0)",
     "python-dotenv (>=1.1.0,<2.0.0)",
+    "datasets (>=3.5.0,<4.0.0)",
+    "numpy (>=2.2.5,<3.0.0)",
 ]
 
 
@@ -21,4 +23,4 @@ requires = ["poetry-core>=2.0.0,<3.0.0"]
 build-backend = "poetry.core.masonry.api"
 
 [tool.poetry.scripts]
-start = "dataset.main:main"
+start = "helpdesk_dataset.main:main"
