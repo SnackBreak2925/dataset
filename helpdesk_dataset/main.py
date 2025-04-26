@@ -29,7 +29,14 @@ def get_engine():
         f"{db_config['dialect']}://{db_config['user']}:{db_config['password']}"
         f"@{db_config['host']}:{db_config['port']}/{db_config['database']}"
     )
-    return create_engine(connection_string)
+    return create_engine(
+        connection_string,
+        connect_args={
+            "charset": "utf8mb3",
+            "collation": "utf8mb3_unicode_ci",
+        },
+        pool_pre_ping=True,
+    )
 
 
 def define_sql_function(engine):
@@ -65,7 +72,7 @@ def clean_text(text_data: str) -> str:
     result = re.sub(EMAIL_REGEX, "[EMAIL]", result)
     result = re.sub(URL_REGEX, "[URL]", result)
 
-    return result
+    return repr(result)
 
 
 def main():
@@ -73,7 +80,7 @@ def main():
     define_sql_function(engine)
 
     query = """
-    SELECT DISTINCT
+    SELECT
         hesk_tickets.id,
         clean_text(hesk_tickets.message) AS ticket_message,
         COALESCE(
@@ -129,7 +136,4 @@ def main():
     h.body_width = 0
     for row in df.itertuples():
         text = row.reply_message
-        text = h.handle(text).strip()
-        text = re.sub(EMAIL_REGEX, "[EMAIL]", text)
-        text = re.sub(URL_REGEX, "[URL]", text)
-        print(row.id, repr(text))
+        print(row.id, clean_text(text))
