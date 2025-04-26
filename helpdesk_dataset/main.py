@@ -4,7 +4,8 @@ from sqlalchemy import create_engine, text
 from dotenv import load_dotenv
 from html2text import HTML2Text
 import re
-from datasets import Dataset
+from datasets import Dataset, DatasetDict
+from transformers import AutoTokenizer
 
 EMAIL_REGEX = r'(([^<>()\[\]\\.,;:\s@"]+(\.[^<>()\[\]\\.,;:\s@"]+)*)|(".+"))@((\[[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}])|(([a-zA-Z\-0-9]+\.)+[a-zA-Z]{2,}))'
 URL_REGEX = r"https?:\/\/(www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b([-a-zA-Z0-9()!@:%_\+.~#?&\/\/=]*)"
@@ -61,7 +62,44 @@ CREATE FUNCTION IF NOT EXISTS clean_text(input_text LONGTEXT)
         conn.commit()
 
 
-def clean_text(text_data: str) -> str:
+def repiles_query():
+    return """
+SELECT
+    hesk_replies.id,
+    hesk_tickets.id AS ticket_id,
+    clean_text(hesk_tickets.message) AS ticket_message,
+    COALESCE(
+        REPLACE(
+            clean_text(hesk_replies.message),
+            clean_text(hesk_users.signature),
+            '[SIGNATURE]'
+        ),
+        clean_text(hesk_replies.message)
+    )AS reply_message,
+    hesk_categories.name AS category_title
+FROM hesk_replies
+INNER JOIN hesk_tickets ON hesk_tickets.id = hesk_replies.replyto
+INNER JOIN hesk_categories ON hesk_categories.id = hesk_tickets.category
+LEFT JOIN hesk_users ON hesk_replies.staffid = hesk_users.id
+"""
+
+
+def articles_query():
+    return """
+SELECT
+    hesk_kb_articles.id,
+    hesk_kb_articles.subject as subject,
+    clean_text(hesk_kb_articles.content) as instruction,
+    hesk_kb_articles.keywords as keywords,
+    hesk_kb_categories.name AS category_title
+FROM hesk_kb_articles
+INNER JOIN hesk_kb_categories ON hesk_kb_categories.id = hesk_kb_articles.catid
+"""
+
+
+def clean_text(text_data):
+    if type(text_data) is not str:
+        return
     h = HTML2Text()
     h.ignore_links = True
     h.ignore_images = True
@@ -79,61 +117,37 @@ def main():
     engine = get_engine()
     define_sql_function(engine)
 
-    query = """
-    SELECT
-        hesk_tickets.id,
-        clean_text(hesk_tickets.message) AS ticket_message,
-        COALESCE(
-            REPLACE(
-                clean_text(hesk_replies.message),
-                clean_text(hesk_users.signature),
-                '[SIGNATURE]'
-            ),
-            clean_text(hesk_replies.message)
-        )AS reply_message,
-        hesk_categories.name AS category_title
-    FROM hesk_tickets
-    INNER JOIN hesk_replies ON hesk_replies.replyto = hesk_tickets.id
-    INNER JOIN hesk_categories ON hesk_categories.id = hesk_tickets.category
-    LEFT JOIN hesk_users ON hesk_replies.staffid = hesk_users.id
-    WHERE hesk_tickets.replies > 2 AND hesk_tickets.id = 6620 OR hesk_tickets.id = 6870
-    ORDER BY hesk_tickets.id DESC
-    LIMIT 100
-    """
+    replies_df = pd.read_sql(repiles_query(), engine)
+    knowledge_df = pd.read_sql(articles_query(), engine)
 
-    articles_query = """
-    SELECT
-        hesk_kb_articles.subject as subject,
-        clean_text(hesk_kb_articles.content) as instruction,
-        hesk_kb_articles.keywords as keywords,
-        hesk_kb_categories.name AS category_title
-    FROM hesk_kb_articles
-    INNER JOIN hesk_kb_categories ON hesk_kb_categories.id = hesk_kb_articles.catid
-    LIMIT 5
-    """
+    replies_df_clean = replies_df.map(clean_text)
+    knowledge_df_clean = knowledge_df.map(clean_text)
 
-    # df = pd.read_sql(query, engine)
-    # df = df.drop("id", axis=1)
-    # df_clean = df.map(clean_text)
-    # dataset = Dataset.from_pandas(df_clean)
-    # dataset = dataset.map(
-    #     lambda x: {
-    #         "text": f"Тикет: {x['ticket_message']}\nОтвет: {x['reply_message']}",
-    #         "metadata": {"category": x["category_title"]},
-    #     }
-    # )
-    # print(dataset[0])
-    # dataset.to_json("tickets.jsonl")
-    # print(os.getenv("PWD") + "/ticket_replies_dataset")
-    # dataset.save_to_disk(os.getenv("PWD") + "/ticket_replies_dataset")
+    replies_dataset = Dataset.from_pandas(replies_df_clean)
+    replies_dataset = replies_dataset.map(
+        lambda x: {
+            "text": f"Тикет: {x['ticket_message']}\nОтвет: {x['reply_message']}",
+            "metadata": {
+                "category": x["category_title"],
+                "ticket_id": x["ticket_id"],
+                "message_id": x["id"],
+            },
+        }
+    )
 
-    df = pd.read_sql(query, engine)
-    print(df)
-    h = HTML2Text()
-    h.ignore_links = True
-    h.ignore_images = True
-    h.single_line = True
-    h.body_width = 0
-    for row in df.itertuples():
-        text = row.reply_message
-        print(row.id, clean_text(text))
+    kb_dataset = Dataset.from_pandas(knowledge_df_clean)
+    kb_dataset = kb_dataset.map(
+        lambda x: {
+            "text": f"Тема: {x['subject']}\nИнструкция: {x['instruction']}",
+            "metadata": {
+                "article_id": x["id"],
+                "category": x["category_title"],
+                "keywords": x["keywords"],
+            },
+        }
+    )
+
+    dataset_dict = DatasetDict(
+        {"tickets": replies_dataset, "knowledge_base": kb_dataset}
+    )
+    dataset_dict.save_to_disk(os.getenv("PWD") + "/ticket_replies_dataset")
