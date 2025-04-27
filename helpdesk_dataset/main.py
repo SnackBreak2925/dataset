@@ -5,7 +5,6 @@ from dotenv import load_dotenv
 from html2text import HTML2Text
 import re
 from datasets import Dataset, DatasetDict
-from transformers import AutoTokenizer
 
 EMAIL_REGEX = r'(([^<>()\[\]\\.,;:\s@"]+(\.[^<>()\[\]\\.,;:\s@"]+)*)|(".+"))@((\[[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}])|(([a-zA-Z\-0-9]+\.)+[a-zA-Z]{2,}))'
 URL_REGEX = r"https?:\/\/(www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b([-a-zA-Z0-9()!@:%_\+.~#?&\/\/=]*)"
@@ -67,6 +66,7 @@ def repiles_query():
 SELECT
     hesk_replies.id,
     hesk_tickets.id AS ticket_id,
+    hesk_tickets.subject AS subject,
     clean_text(hesk_tickets.message) AS ticket_message,
     COALESCE(
         REPLACE(
@@ -75,7 +75,7 @@ SELECT
             '[SIGNATURE]'
         ),
         clean_text(hesk_replies.message)
-    )AS reply_message,
+    ) AS reply_message,
     hesk_categories.name AS category_title
 FROM hesk_replies
 INNER JOIN hesk_tickets ON hesk_tickets.id = hesk_replies.replyto
@@ -110,7 +110,7 @@ def clean_text(text_data):
     result = re.sub(EMAIL_REGEX, "[EMAIL]", result)
     result = re.sub(URL_REGEX, "[URL]", result)
 
-    return repr(result)
+    return result
 
 
 def main():
@@ -129,6 +129,7 @@ def main():
             "text": f"Тикет: {x['ticket_message']}\nОтвет: {x['reply_message']}",
             "metadata": {
                 "category": x["category_title"],
+                "subject": x["subject"],
                 "ticket_id": x["ticket_id"],
                 "message_id": x["id"],
             },
