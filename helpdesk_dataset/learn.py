@@ -4,9 +4,67 @@ from transformers import (
     T5ForConditionalGeneration,
     Trainer,
     TrainingArguments,
+    TrainerCallback,
 )
 import torch
 import os
+
+# --- Фиксированные тестовые вопросы
+test_questions = [
+    "Как узнать статус заявки?",
+    "Как восстановить пароль?",
+    "Куда обращаться за поддержкой программного обеспечения?",
+    "Здравствуйте, хотелось бы получить ПО Microsoft студенческий",
+]
+
+
+# --- Функция для генерации ответа на один вопрос
+def generate_answer(model, tokenizer, question):
+    prompt = f"Тикет: {question}\nОтвет:"
+    inputs = tokenizer(
+        prompt,
+        return_tensors="pt",
+        max_length=512,
+        truncation=True,
+    )
+
+    device = next(model.parameters()).device  # <<< Получаем устройство модели
+    inputs = {
+        k: v.to(device) for k, v in inputs.items()
+    }  # <<< Переносим всё на устройство
+
+    with torch.no_grad():
+        outputs = model.generate(
+            input_ids=inputs["input_ids"],
+            attention_mask=inputs["attention_mask"],
+            max_length=128,
+            num_beams=5,
+            early_stopping=True,
+        )
+
+    answer = tokenizer.decode(outputs[0], skip_special_tokens=True)
+    return answer
+
+
+# --- Наш кастомный Callback
+class InferenceCallback(TrainerCallback):
+    def __init__(self, tokenizer, test_questions, eval_steps=1000):
+        self.tokenizer = tokenizer
+        self.test_questions = test_questions
+        self.eval_steps = eval_steps
+
+    def on_step_end(self, args, state, control, **kwargs):
+        # Проверяем: настал ли нужный шаг для проверки
+        if state.global_step % self.eval_steps == 0 and state.global_step > 0:
+            print(
+                f"\n\n=== Проверка модели на тестовых вопросах (шаг {state.global_step}) ==="
+            )
+            model = kwargs["model"].eval()
+            for idx, question in enumerate(self.test_questions, 1):
+                answer = generate_answer(model, self.tokenizer, question)
+                print(f"{idx}. Вопрос: {question}")
+                print(f"   Ответ: {answer}\n")
+            model.train()
 
 # 1. Загружаем датасет
 dataset = load_from_disk(os.path.join(os.getenv("PWD"), "ticket_replies_dataset"))
@@ -82,13 +140,17 @@ trainer = Trainer(
     model=model,
     args=training_args,
     train_dataset=tokenized_dataset,
-    eval_dataset=tokenized_dataset.select(
-        range(100)
-    ),  # небольшой валидационный кусочек
+    eval_dataset=tokenized_dataset.select(range(100)),
+    callbacks=[
+        InferenceCallback(tokenizer, test_questions, eval_steps=200)
+    ],  # небольшой валидационный кусочек
 )
 
-print(full_dataset[0])
-print(tokenized_dataset[0])
+# print(full_dataset[0])
+# print(full_dataset[-1])
+# print(tokenized_dataset[0])
+# print(tokenized_dataset[-1])
+
 # 7. Запускаем обучение
 trainer.train()
 
