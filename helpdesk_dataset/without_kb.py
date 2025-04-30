@@ -65,23 +65,26 @@ def repiles_query():
     return """
 SELECT
     messages.id,
-    hesk_tickets.id AS ticket_id,
-    hesk_tickets.subject AS subject,
-    clean_text(hesk_tickets.message) AS ticket_message,
+    tickets.id AS ticket_id,
+    tickets.subject AS subject,
+    clean_text(tickets.message) AS ticket_message,
     COALESCE(
         REPLACE(
             clean_text(messages.message),
-            clean_text(hesk_users.signature),
+            clean_text(staff.signature),
             '[SIGNATURE]'
         ),
         clean_text(messages.message)
     ) AS reply_message,
-    hesk_categories.name AS category_title
+    category.name AS category_title
 FROM hesk_replies AS messages
-INNER JOIN hesk_tickets ON hesk_tickets.id = messages.replyto AS tickets
-INNER JOIN hesk_categories ON hesk_categories.id = hesk_tickets.category AS category
-INNER JOIN hesk_users ON messages.staffid = hesk_users.id AS staff
-WHERE hesk_tickets.status = 3 AND messages.staffid != 0 AND messages.rating == 5
+INNER JOIN hesk_tickets AS tickets ON tickets.id = messages.replyto
+INNER JOIN hesk_categories  AS category ON category.id = tickets.category
+LEFT JOIN hesk_users AS staff ON messages.staffid = staff.id
+WHERE
+    tickets.status = 3
+    AND messages.staffid != 0
+    AND messages.read = '1'
 """
 
 
