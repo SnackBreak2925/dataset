@@ -2,3 +2,6 @@ __pycache__
 .env
 ticket_replies_dataset
 rut5
+rut5base-finetuned
+knowledge_base.json
+dialogue_dataset.json

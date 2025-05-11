@@ -1,17 +1,20 @@
 import os
+import json
+import dotenv
+import re
 import pandas as pd
 from sqlalchemy import create_engine, text
-from dotenv import load_dotenv
+from collections import defaultdict
+from tqdm import tqdm
+from datasets import Dataset
 from html2text import HTML2Text
-import re
-from datasets import Dataset, DatasetDict
 
 EMAIL_REGEX = r'(([^<>()\[\]\\.,;:\s@"]+(\.[^<>()\[\]\\.,;:\s@"]+)*)|(".+"))@((\[[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}])|(([a-zA-Z\-0-9]+\.)+[a-zA-Z]{2,}))'
 URL_REGEX = r"https?:\/\/(www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b([-a-zA-Z0-9()!@:%_\+.~#?&\/\/=]*)"
 
 
 def load_db_config():
-    load_dotenv()
+    dotenv.load_dotenv()
     return {
         "host": os.getenv("DB_HOST"),
         "port": os.getenv("DB_PORT"),
@@ -24,17 +27,13 @@ def load_db_config():
 
 def get_engine():
     db_config = load_db_config()
-
     connection_string = (
         f"{db_config['dialect']}://{db_config['user']}:{db_config['password']}"
         f"@{db_config['host']}:{db_config['port']}/{db_config['database']}"
     )
     return create_engine(
         connection_string,
-        connect_args={
-            "charset": "utf8mb3",
-            "collation": "utf8mb3_unicode_ci",
-        },
+        connect_args={"charset": "utf8mb3", "collation": "utf8mb3_unicode_ci"},
         pool_pre_ping=True,
     )
 
@@ -49,10 +48,9 @@ CREATE FUNCTION IF NOT EXISTS clean_text(input_text LONGTEXT)
         SET cleaned = REGEXP_REPLACE(input_text, '<[^>]+>', ' ');
         SET cleaned = REGEXP_REPLACE(cleaned, '<br />', ' ');
         SET cleaned = REGEXP_REPLACE(cleaned, '[\r\n]+', ' ');
-        SET cleaned = REGEXP_REPLACE(cleaned, '\\\\s{2,}', ' ');
-        SET cleaned = REGEXP_REPLACE(cleaned, ' \\\\.', '\\\\.');
+        SET cleaned = REGEXP_REPLACE(cleaned, '\\s{2,}', ' ');
+        SET cleaned = REGEXP_REPLACE(cleaned, ' \\.', '\\.');
         SET cleaned = TRIM(cleaned);
-
         RETURN cleaned;
     END
 """
@@ -76,7 +74,9 @@ SELECT
         ),
         clean_text(messages.message)
     ) AS reply_message,
-    category.name AS category_title
+    category.name AS category_title,
+    messages.dt AS created_at,
+    messages.staffid
 FROM hesk_replies AS messages
 INNER JOIN hesk_tickets AS tickets ON tickets.id = messages.replyto
 INNER JOIN hesk_categories  AS category ON category.id = tickets.category
@@ -84,25 +84,13 @@ LEFT JOIN hesk_users AS staff ON messages.staffid = staff.id
 WHERE
     tickets.status = 3
     AND tickets.staffreplies > 0
-"""
-
-
-def articles_query():
-    return """
-SELECT
-    hesk_kb_articles.id,
-    hesk_kb_articles.subject as subject,
-    clean_text(hesk_kb_articles.content) as instruction,
-    hesk_kb_articles.keywords as keywords,
-    hesk_kb_categories.name AS category_title
-FROM hesk_kb_articles
-INNER JOIN hesk_kb_categories ON hesk_kb_categories.id = hesk_kb_articles.catid
+ORDER BY ticket_id, created_at
 """
 
 
 def clean_text(text_data):
     if type(text_data) is not str:
-        return
+        return ""
     h = HTML2Text()
     h.ignore_links = True
     h.ignore_images = True
@@ -112,49 +100,51 @@ def clean_text(text_data):
     result = h.handle(result).strip()
     result = re.sub(EMAIL_REGEX, "[EMAIL]", result)
     result = re.sub(URL_REGEX, "[URL]", result)
-
     return result
 
 
-def main():
+if __name__ == "__main__":
     engine = get_engine()
-    define_sql_function(engine)
 
-    replies_df = pd.read_sql(repiles_query(), engine)
-    knowledge_df = pd.read_sql(articles_query(), engine)
+    with engine.connect() as conn:
+        conn.execute(text("SET NAMES utf8mb3"))
+        replies_df = pd.read_sql(repiles_query(), conn)
 
-    replies_df_clean = replies_df.map(clean_text)
-    knowledge_df_clean = knowledge_df.map(clean_text)
+    replies_df = replies_df.fillna("")
 
-    replies_dataset = Dataset.from_pandas(replies_df_clean)
-    replies_dataset = replies_dataset.map(
-        lambda x: {
-            "text": f"Тикет: {x['ticket_message']}\nОтвет: {x['reply_message']}",
-            "metadata": {
-                "category": x["category_title"],
-                "subject": x["subject"],
-                "ticket_id": x["ticket_id"],
-                "message_id": x["id"],
-            },
-        }
-    )
+    ticket_dialogs = defaultdict(list)
+    ticket_messages = {}
+    ticket_categories = {}
 
-    kb_dataset = Dataset.from_pandas(knowledge_df_clean)
-    kb_dataset = kb_dataset.map(
-        lambda x: {
-            "text": f"Тема: {x['subject']}\nИнструкция: {x['instruction']}",
-            "metadata": {
-                "article_id": x["id"],
-                "category": x["category_title"],
-                "keywords": x["keywords"],
-            },
-        }
-    )
+    for _, row in replies_df.iterrows():
+        role = "Пользователь" if row.staffid == 0 else "Оператор"
+        message = clean_text(row.reply_message)
+        if message:
+            ticket_dialogs[row.ticket_id].append({"role": role, "message": message})
+        if row.ticket_id not in ticket_messages:
+            ticket_messages[row.ticket_id] = clean_text(row.ticket_message)
+        if row.ticket_id not in ticket_categories:
+            ticket_categories[row.ticket_id] = row.category_title.strip()
 
-    dataset_dict = DatasetDict(
-        {"tickets": replies_dataset, "knowledge_base": kb_dataset}
-    )
-    dataset_dict.save_to_disk(os.getenv("PWD") + "/ticket_replies_dataset")
+    dataset = []
+    for ticket_id, messages in ticket_dialogs.items():
+        last = messages[-1]
+        if last["role"] == "Оператор":
+            dialogue = "\n".join(
+                [f"{m['role']}: {m['message']}" for m in messages[:-1]]
+            )
+            category = ticket_categories.get(ticket_id, "неизвестно")
+            full_text = f"Категория: {category}\nПервичное сообщение: {ticket_messages.get(ticket_id, '')}\n{dialogue}"
+            dataset.append(
+                {
+                    "text": full_text,
+                    "label": last["message"],
+                    "category_title": category,
+                    "ticket_id": ticket_id,
+                }
+            )
 
-    kb_path = os.getenv("PWD") + "/knowledge_base.json"
-    kb_dataset.to_json(kb_path, orient="records", force_ascii=False, lines=False)
+    with open("dialogue_dataset.json", "w", encoding="utf-8") as f:
+        json.dump(dataset, f, ensure_ascii=False, indent=2)
+
+    print(f"✅ Сохранено {len(dataset)} диалогов в dialogue_dataset.json")
