@@ -96,11 +96,13 @@ def clean_text(text_data):
     h.ignore_images = True
     h.single_line = True
     h.body_width = 0
-    result = text_data
-    result = h.handle(result).strip()
+    result = h.handle(text_data).strip()
     result = re.sub(EMAIL_REGEX, "[EMAIL]", result)
-    result = re.sub(URL_REGEX, "[URL]", result)
-    return result
+    result = re.sub(r"\[SIGNATURE\]", "", result)
+    result = re.sub(r"\[URL\]", "", result)
+    result = re.sub(URL_REGEX, "", result)
+    result = re.sub(r"\s{2,}", " ", result)
+    return result.strip()
 
 
 if __name__ == "__main__":

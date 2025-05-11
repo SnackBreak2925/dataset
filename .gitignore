@@ -5,3 +5,8 @@ rut5
 rut5base-finetuned
 knowledge_base.json
 dialogue_dataset.json
+rag_inputs_by_request
+kb_by_category
+dialogue_sessions
+rag_answers_log.csv
+rag_debug.log
