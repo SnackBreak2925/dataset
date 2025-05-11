@@ -1,7 +1,13 @@
 # rag_pipeline_by_category.py
 # 🧠 RAG‑пайплайн с улучшенной категоризацией, удалением дубликатов и генерацией разнообразных ответов
 
-import json, os, logging, csv, datetime, re, torch
+import json
+import os
+import logging
+import csv
+import datetime
+import re
+import torch
 from transformers import T5Tokenizer, T5ForConditionalGeneration
 from sentence_transformers import SentenceTransformer, util
 

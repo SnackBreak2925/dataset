@@ -5,8 +5,6 @@ import re
 import pandas as pd
 from sqlalchemy import create_engine, text
 from collections import defaultdict
-from tqdm import tqdm
-from datasets import Dataset
 from html2text import HTML2Text
 
 EMAIL_REGEX = r'(([^<>()\[\]\\.,;:\s@"]+(\.[^<>()\[\]\\.,;:\s@"]+)*)|(".+"))@((\[[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}])|(([a-zA-Z\-0-9]+\.)+[a-zA-Z]{2,}))'
