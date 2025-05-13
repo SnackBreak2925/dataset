@@ -26,6 +26,24 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(message)s",
 )
 
+
+# === Безопасная токенизация ===
+def safe_encode(text):
+    if not isinstance(text, str):
+        logging.warning(f"Попытка закодировать не-строку: {repr(text)}")
+        return None
+    text = text.strip()
+    if not text:
+        logging.warning("Попытка закодировать пустую строку")
+        return None
+    try:
+        return retriever.encode(text, convert_to_tensor=True)
+    except Exception as e:
+        logging.exception(f"Ошибка при кодировании текста: {repr(text)} — {e}")
+        return None
+
+
+# === Инициализация моделей ===
 tokenizer = T5Tokenizer.from_pretrained(MODEL_PATH)
 model = (
     T5ForConditionalGeneration.from_pretrained(MODEL_PATH)
@@ -59,7 +77,9 @@ def is_uninformative(answer):
 
 
 def auto_detect_category(question):
-    q_emb = retriever.encode(question, convert_to_tensor=True)
+    q_emb = safe_encode(question)
+    if q_emb is None:
+        return None
     sims = util.cos_sim(q_emb, category_name_embeddings)[0]
     top = torch.topk(sims, 1).indices[0].item()
     return category_names[top] if sims[top] >= 0.2 else None
@@ -69,7 +89,9 @@ def generate_response(category, dialogue, top_k=TOP_K):
     kb = category_kbs[category]
     kb_emb = category_embeddings[category]
     last_question = dialogue[-1]["user"]
-    q_emb = retriever.encode(last_question, convert_to_tensor=True)
+    q_emb = safe_encode(last_question)
+    if q_emb is None:
+        return "[Ошибка обработки запроса, попробуйте переформулировать]", 0.0
     hits = util.semantic_search(q_emb, kb_emb, top_k=top_k)[0]
     if not hits:
         return "[нет контекста]", 0.0
@@ -84,12 +106,18 @@ def generate_response(category, dialogue, top_k=TOP_K):
     )
     prompt = f"Категория: {category}\nКонтекст: {ctx}\nДиалог:\n{dialogue_text}\nПользователь: {last_question}\nМодель:"
     logging.info("Prompt:\n%s\n", prompt)
-    ids = tokenizer.encode(
-        prompt, return_tensors="pt", truncation=True, max_length=512
-    ).to(model.device)
-    with torch.no_grad():
-        out = model.generate(ids, max_length=64, do_sample=True, top_k=50, top_p=0.95)
-    answer = tokenizer.decode(out[0], skip_special_tokens=True)
+    try:
+        ids = tokenizer.encode(
+            prompt, return_tensors="pt", truncation=True, max_length=512
+        ).to(model.device)
+        with torch.no_grad():
+            out = model.generate(
+                ids, max_length=64, do_sample=True, top_k=50, top_p=0.95
+            )
+        answer = tokenizer.decode(out[0], skip_special_tokens=True)
+    except Exception as e:
+        logging.exception("Ошибка генерации ответа: %s", e)
+        return "[Ошибка генерации ответа]", 0.0
     return answer, hits[0]["score"]
 
 
