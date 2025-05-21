@@ -6,7 +6,7 @@ authors = [
     {name = "Snack",email = "nurd_galim@mail.ru"}
 ]
 readme = "README.md"
-requires-python = "^3.12"
+requires-python = ">=3.12,<4.0"
 dependencies = [
     "pandas (>=2.2.3,<3.0.0)",
     "sqlalchemy (>=2.0.40,<3.0.0)",
