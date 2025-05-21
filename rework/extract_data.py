@@ -134,7 +134,7 @@ if __name__ == "__main__":
                 [f"{m['role']}: {m['message']}" for m in messages[:-1]]
             )
             category = ticket_categories.get(ticket_id, "неизвестно")
-            full_text = f"Категория: {category}\nПервичное сообщение: {ticket_messages.get(ticket_id, '')}\n{dialogue}"
+            full_text = f"Категория: {category}\nПользователь: {ticket_messages.get(ticket_id, '')}\n{dialogue}"
             dataset.append(
                 {
                     "text": full_text,
