@@ -248,36 +248,71 @@ if __name__ == "__main__":
         if "bleu" in entry:
             bleu.append((entry["step"], entry["bleu"]))
 
+    # Получаем параметры обучения
+    max_steps = trainer.state.max_steps or (max(steps) if steps else 1)
+    num_epochs = getattr(trainer.state, "num_train_epochs", 1) or 1
+
+    def step_to_epoch(step):
+        steps_per_epoch = max_steps / num_epochs
+        return step / steps_per_epoch
+
+    def prepend_zero(xs, ys):
+        return [0] + list(xs), [0] + list(ys)
+
     plt.figure(figsize=(18, 6))
 
+    # === Loss Plot ===
     plt.subplot(1, 3, 1)
-    plt.plot(steps, loss, label="Train Loss")
+    epoch_steps = [step_to_epoch(s) for s in steps]
+    x_loss, y_loss = prepend_zero(epoch_steps, loss)
+    plt.plot(x_loss, y_loss, label="Train Loss")
     if eval_loss:
-        plt.plot(steps[: len(eval_loss)], eval_loss, label="Eval Loss")
+        eval_epoch_steps = epoch_steps[: len(eval_loss)]
+        x_eval, y_eval = prepend_zero(eval_epoch_steps, eval_loss)
+        plt.plot(x_eval, y_eval, label="Eval Loss")
     plt.title("Loss")
+    plt.xlabel("Epoch")
     plt.legend()
+    plt.grid(True)
 
+    # === Metrics ===
     plt.subplot(1, 3, 2)
+    plt.ylim(0, 1)
+    plt.xlabel("Epoch")
     if acc:
         acc_steps, acc_vals = zip(*acc)
+        acc_steps, acc_vals = prepend_zero(
+            [step_to_epoch(s) for s in acc_steps], acc_vals
+        )
         plt.plot(acc_steps, acc_vals, label="Accuracy")
     if bleu:
         bleu_steps, bleu_vals = zip(*bleu)
+        bleu_steps, bleu_vals = prepend_zero(
+            [step_to_epoch(s) for s in bleu_steps], bleu_vals
+        )
         plt.plot(bleu_steps, bleu_vals, label="BLEU")
     if rouge1:
         r1_steps, r1_vals = zip(*rouge1)
+        r1_steps, r1_vals = prepend_zero([step_to_epoch(s) for s in r1_steps], r1_vals)
         plt.plot(r1_steps, r1_vals, label="ROUGE-1")
     if rougeL:
         rL_steps, rL_vals = zip(*rougeL)
+        rL_steps, rL_vals = prepend_zero([step_to_epoch(s) for s in rL_steps], rL_vals)
         plt.plot(rL_steps, rL_vals, label="ROUGE-L")
     plt.title("Text Metrics")
     plt.legend()
+    plt.grid(True)
 
+    # === Learning Rate Plot ===
     plt.subplot(1, 3, 3)
     if lr:
-        plt.plot(steps[: len(lr)], lr, label="Learning Rate")
+        x_lr = epoch_steps[: len(lr)]
+        x_lr, y_lr = prepend_zero(x_lr, lr)
+        plt.plot(x_lr, y_lr, label="Learning Rate")
     plt.title("Learning Rate")
+    plt.xlabel("Epoch")
     plt.legend()
+    plt.grid(True)
 
     plt.tight_layout()
     os.makedirs("train_results", exist_ok=True)
