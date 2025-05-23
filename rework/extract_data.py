@@ -37,7 +37,7 @@ def get_engine():
 
 
 def define_sql_function(engine):
-    sql_function = """
+    sql_function = r"""
 CREATE FUNCTION IF NOT EXISTS clean_text(input_text LONGTEXT)
     RETURNS LONGTEXT
     DETERMINISTIC
@@ -45,9 +45,9 @@ CREATE FUNCTION IF NOT EXISTS clean_text(input_text LONGTEXT)
         DECLARE cleaned LONGTEXT;
         SET cleaned = REGEXP_REPLACE(input_text, '<[^>]+>', ' ');
         SET cleaned = REGEXP_REPLACE(cleaned, '<br />', ' ');
-        SET cleaned = REGEXP_REPLACE(cleaned, '[\r\n]+', ' ');
+        SET cleaned = REGEXP_REPLACE(cleaned, '[\\r\\n]+', ' ');
         SET cleaned = REGEXP_REPLACE(cleaned, '\\s{2,}', ' ');
-        SET cleaned = REGEXP_REPLACE(cleaned, ' \\.', '\\.');
+        SET cleaned = REGEXP_REPLACE(cleaned, '\\s+\\.', '\\.');
         SET cleaned = TRIM(cleaned);
         RETURN cleaned;
     END
@@ -58,7 +58,7 @@ CREATE FUNCTION IF NOT EXISTS clean_text(input_text LONGTEXT)
 
 
 def repiles_query():
-    return """
+    return r"""
 SELECT
     messages.id,
     tickets.id AS ticket_id,
@@ -105,6 +105,7 @@ def clean_text(text_data):
 
 if __name__ == "__main__":
     engine = get_engine()
+    define_sql_function(engine)
 
     with engine.connect() as conn:
         conn.execute(text("SET NAMES utf8mb3"))
