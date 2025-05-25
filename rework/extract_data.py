@@ -129,23 +129,46 @@ if __name__ == "__main__":
 
     dataset = []
     for ticket_id, messages in ticket_dialogs.items():
-        last = messages[-1]
-        if last["role"] == "Оператор":
-            dialogue = "\n".join(
-                [f"{m['role']}: {m['message']}" for m in messages[:-1]]
-            )
-            category = ticket_categories.get(ticket_id, "неизвестно")
-            full_text = f"Категория: {category}\nПользователь: {ticket_messages.get(ticket_id, '')}\n{dialogue}Оператор: {last['message']}"
-            dataset.append(
-                {
-                    "text": full_text,
-                    "label": last["message"],
-                    "category_title": category,
-                    "ticket_id": ticket_id,
-                }
-            )
+        # Ищем последний ответ оператора с конца
+        idx = len(messages) - 1
+        while idx >= 0 and messages[idx]["role"] != "Оператор":
+            idx -= 1
+        if idx < 0:
+            continue  # Нет ответа оператора вообще
+        last_operator_msg = messages[idx]
+
+        # Формируем диалог до этого ответа
+        dialogue = "\n".join([f"{m['role']}: {m['message']}" for m in messages[:idx]])
+        category = ticket_categories.get(ticket_id, "неизвестно")
+        full_text = f"Категория: {category}\nПользователь: {ticket_messages.get(ticket_id, '')}\n{dialogue}Оператор: "
+
+        dataset.append(
+            {
+                "text": full_text,
+                "label": last_operator_msg["message"],
+                "category_title": category,
+                "ticket_id": ticket_id,
+            }
+        )
 
     with open("dialogue_dataset.json", "w", encoding="utf-8") as f:
         json.dump(dataset, f, ensure_ascii=False, indent=2)
 
     print(f"✅ Сохранено {len(dataset)} диалогов в dialogue_dataset.json")
+
+    with open("dialogue_dataset.json", encoding="utf-8") as f:
+        raw_data = json.load(f)
+
+    unique_labels = set()
+    cleaned_data = []
+    for d in raw_data:
+        label = clean_text(d["label"])
+        if label not in unique_labels:
+            unique_labels.add(label)
+            d["label"] = label
+            cleaned_data.append(d)
+        # else:
+        #     print(f"id: {d['ticket_id']}\nОтвет: {label}")
+    with open("cleaned_dialogue_dataset.json", "w", encoding="utf-8") as f:
+        json.dump(cleaned_data, f, ensure_ascii=False, indent=2)
+    print(f"Было {len(raw_data)} примеров, стало {len(cleaned_data)} уникальных label.")

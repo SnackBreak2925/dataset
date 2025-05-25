@@ -10,3 +10,5 @@ kb_by_category
 dialogue_sessions
 rag_answers_log.csv
 rag_debug.log
+testset.json
+cleaned_dialogue_dataset.json

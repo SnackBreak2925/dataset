@@ -24,24 +24,24 @@ class LogCallback(TrainerCallback):
         self.tokenizer = tokenizer
         self.examples = raw_data[:5]
 
-    def on_step_end(self, args, state, control, **kwargs):
-        if state.global_step % 500 == 0:
-            print(f"\n=== Проверка модели на шаге {state.global_step} ===")
-            kwargs["model"].eval()
-            for ex in self.examples:
-                input_ids = self.tokenizer.encode(
-                    ex["text"], return_tensors="pt", max_length=256, truncation=True
-                ).to(kwargs["model"].device)
-                outputs = kwargs["model"].generate(
-                    input_ids,
-                    max_length=64,
-                    past_key_values=EncoderDecoderCache.from_legacy_cache(None),
-                )
-                answer = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
-                print(f"\n[Категория]: {ex.get('category_title', 'нет')}")
-                print(f"[Входной текст]:\n{ex['text']}\n")
-                print(f"[Эталонный ответ]: {ex['label']}\n[Ответ модели]: {answer}\n")
-            kwargs["model"].train()
+    def on_evaluate(self, args, state, control, **kwargs):
+        print(f"\n=== Проверка модели на шаге {state.global_step} ===")
+        kwargs["model"].eval()
+        "Категория: {category}\nПользователь: {ticket_messages.get(ticket_id, '')}\n{dialogue}"
+        for ex in self.examples:
+            input_ids = self.tokenizer.encode(
+                ex["text"], return_tensors="pt", max_length=256, truncation=True
+            ).to(kwargs["model"].device)
+            outputs = kwargs["model"].generate(
+                input_ids,
+                max_length=64,
+                past_key_values=EncoderDecoderCache.from_legacy_cache(None),
+            )
+            answer = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
+            print(f"\n[Категория]: {ex.get('category_title', 'нет')}")
+            print(f"[Входной текст]: {ex['text']}")
+            print(f"[Эталонный ответ]: {ex['label']}\n[Ответ модели]: {answer}\n")
+        kwargs["model"].train()
 
 
 class AccuracyCallback(TrainerCallback):
@@ -51,6 +51,7 @@ class AccuracyCallback(TrainerCallback):
         self.smooth = SmoothingFunction().method1
 
     def on_evaluate(self, args, state, control, **kwargs):
+        print(f"\nЭпоха {state.epoch} завершена!")
         model = kwargs["model"]
         eval_dataloader = kwargs["eval_dataloader"]
         model.eval()
@@ -155,21 +156,35 @@ def preprocess(example):
 
 # === Основной блок ===
 if __name__ == "__main__":
-    with open("dialogue_dataset.json", encoding="utf-8") as f:
-        raw_data = json.load(f)
+    # Загрузить тестовый датасет из файла
+    with open("testset.json", encoding="utf-8") as f:
+        test_data_raw = json.load(f)
 
-    dataset_for_callback = [
+    # with open("dialogue_dataset.json", encoding="utf-8") as f:
+    with open("cleaned_dialogue_dataset.json", encoding="utf-8") as f:
+        train_data_raw = json.load(f)
+
+    test_data = [
         {
-            "text": f"Категория: {d.get('category_title', 'неизвестно')}\n{d['text']}",
+            "text": f"{d['text']}",
             "label": clean_label(d["label"]),
             "category_title": d.get("category_title", "неизвестно"),
         }
-        for d in raw_data
+        for d in test_data_raw
     ]
 
-    raw_dataset = Dataset.from_list(dataset_for_callback).train_test_split(
-        test_size=0.1
-    )
+
+    train_data = [
+        {
+            "text": f"{d['text']}",
+            "label": clean_label(d["label"]),
+            "category_title": d.get("category_title", "неизвестно"),
+        }
+        for d in train_data_raw
+    ]
+
+    train_dataset = Dataset.from_list(train_data)
+    test_dataset = Dataset.from_list(test_data)
 
     model = T5ForConditionalGeneration.from_pretrained("cointegrated/rut5-base")
     tokenizer = T5Tokenizer.from_pretrained("cointegrated/rut5-base", legacy=False)
@@ -179,9 +194,11 @@ if __name__ == "__main__":
     max_input = 256
     max_output = 64
 
-    tokenized_dataset = raw_dataset.map(
-        preprocess, remove_columns=raw_dataset["train"].column_names
+    tokenized_train = train_dataset.map(
+        preprocess, remove_columns=train_dataset.column_names
     )
+    tokenized_test = test_dataset.map(preprocess, remove_columns=test_dataset.column_names)
+
 
     training_args = Seq2SeqTrainingArguments(
         output_dir="./rut5base-finetuned",
@@ -195,11 +212,10 @@ if __name__ == "__main__":
         lr_scheduler_type="cosine",
         warmup_steps=200,
         logging_steps=100,
-        save_steps=500,
+        save_strategy="epoch",
         save_total_limit=3,
-        eval_strategy="steps",
+        eval_strategy="epoch",
         do_eval=True,
-        eval_steps=500,
         logging_dir="./runs",
         fp16=False,
         bf16=False,
@@ -212,13 +228,14 @@ if __name__ == "__main__":
     trainer = Seq2SeqTrainer(
         model=model,
         args=training_args,
-        train_dataset=tokenized_dataset["train"],
-        eval_dataset=tokenized_dataset["test"],
+        train_dataset=tokenized_train,
+        # eval_dataset=tokenized_test,
+        eval_dataset=tokenized_train,
         data_collator=data_collator,
         callbacks=[
-        LogCallback(tokenizer, dataset_for_callback),
-        AccuracyCallback(tokenizer),
-    ],
+            LogCallback(tokenizer, train_data),
+            AccuracyCallback(tokenizer),
+        ],
     )
 
     trainer.train()
