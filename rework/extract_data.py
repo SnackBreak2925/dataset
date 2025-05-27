@@ -5,7 +5,7 @@ import re
 import pandas as pd
 from sqlalchemy import create_engine, text
 from collections import defaultdict
-from html2text import HTML2Text
+import html
 
 EMAIL_REGEX = r'(([^<>()\[\]\\.,;:\s@"]+(\.[^<>()\[\]\\.,;:\s@"]+)*)|(".+"))@((\[[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}])|(([a-zA-Z\-0-9]+\.)+[a-zA-Z]{2,}))'
 URL_REGEX = r"https?:\/\/(www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b([-a-zA-Z0-9()!@:%_\+.~#?&\/\/=]*)"
@@ -36,42 +36,14 @@ def get_engine():
     )
 
 
-def define_sql_function(engine):
-    sql_function = r"""
-CREATE FUNCTION IF NOT EXISTS clean_text(input_text LONGTEXT)
-    RETURNS LONGTEXT
-    DETERMINISTIC
-    BEGIN
-        DECLARE cleaned LONGTEXT;
-        SET cleaned = REGEXP_REPLACE(input_text, '<[^>]+>', ' ');
-        SET cleaned = REGEXP_REPLACE(cleaned, '<br />', ' ');
-        SET cleaned = REGEXP_REPLACE(cleaned, '[\\r\\n]+', ' ');
-        SET cleaned = REGEXP_REPLACE(cleaned, '\\s{2,}', ' ');
-        SET cleaned = REGEXP_REPLACE(cleaned, '\\s+\\.', '\\.');
-        SET cleaned = TRIM(cleaned);
-        RETURN cleaned;
-    END
-"""
-    with engine.connect() as conn:
-        conn.execute(text(sql_function))
-        conn.commit()
-
-
 def repiles_query():
     return r"""
 SELECT
     messages.id,
     tickets.id AS ticket_id,
     tickets.subject AS subject,
-    clean_text(tickets.message) AS ticket_message,
-    COALESCE(
-        REPLACE(
-            clean_text(messages.message),
-            clean_text(staff.signature),
-            '[SIGNATURE]'
-        ),
-        clean_text(messages.message)
-    ) AS reply_message,
+    tickets.message AS ticket_message,
+    messages.message AS reply_message,
     category.name AS category_title,
     messages.dt AS created_at,
     messages.staffid
@@ -87,38 +59,73 @@ ORDER BY ticket_id, created_at
 
 
 def clean_text(text_data):
-    if type(text_data) is not str:
+    if not isinstance(text_data, str) or not text_data.strip():
         return ""
-    h = HTML2Text()
-    h.ignore_links = True
-    h.ignore_images = True
-    h.single_line = True
-    h.body_width = 0
-    result = h.handle(text_data).strip()
-    result = re.sub(EMAIL_REGEX, "[EMAIL]", result)
-    result = re.sub(r"\[SIGNATURE\]", "", result)
-    result = re.sub(r"\[URL\]", "", result)
-    result = re.sub(URL_REGEX, "", result)
-    result = re.sub(r"\s{2,}", " ", result)
-    return result.strip()
+    text = html.unescape(text_data)
+    substitutions = [
+        (r"<[^>]+>", " "),
+        (r"<br\s*/?>", " "),
+        (EMAIL_REGEX, "[EMAIL]"),
+        (r"\[SIGNATURE\]", ""),
+        (URL_REGEX, "[URL]"),
+        (r"[\r\n]+", " "),
+        (r"\s{2,}", " "),
+        (r"\s+\.", "."),
+    ]
+    for pat, repl in substitutions:
+        text = re.sub(pat, repl, text, flags=re.IGNORECASE)
+    return text.strip()
+
+
+def remove_signature_from_message(row):
+    message = row["reply_message"]
+    staffid = row["staffid"]
+    if staffid != 0:
+        signature = staff_signatures.get(staffid)
+        if signature and signature.strip():
+            message = message.replace(signature, "")
+    return message
+
+
+def build_dialogue(messages, upto_idx):
+    if upto_idx == 0:
+        return ""
+    return "\n".join(f"{m['role']}: {m['message']}" for m in messages[:upto_idx])
 
 
 if __name__ == "__main__":
     engine = get_engine()
-    define_sql_function(engine)
 
     with engine.connect() as conn:
         conn.execute(text("SET NAMES utf8mb3"))
         replies_df = pd.read_sql(repiles_query(), conn)
+        signatures_df = pd.read_sql("SELECT id, signature FROM hesk_users", conn)
+
+    # убрать пустые
+    filtered_signatures_df = signatures_df[signatures_df["signature"].astype(bool)]
+    filtered_signatures_df.loc[:, "signature"] = filtered_signatures_df[
+        "signature"
+    ].apply(clean_text)
+    staff_signatures = dict(
+        zip(filtered_signatures_df["id"], filtered_signatures_df["signature"])
+    )
 
     replies_df = replies_df.fillna("")
+
+    replies_df.loc[:, "subject"] = replies_df["subject"].apply(clean_text)
+    replies_df.loc[:, "ticket_message"] = replies_df["ticket_message"].apply(clean_text)
+    replies_df.loc[:, "reply_message"] = replies_df["reply_message"].apply(clean_text)
+    replies_df.loc[:, "reply_message"] = replies_df.apply(
+        remove_signature_from_message, axis=1
+    )
 
     ticket_dialogs = defaultdict(list)
     ticket_messages = {}
     ticket_categories = {}
+    ticket_subjects = {}
 
     for _, row in replies_df.iterrows():
-        role = "Пользователь" if row.staffid == 0 else "Оператор"
+        role = "Пользователь" if int(row.staffid) == 0 else "Оператор"
         message = clean_text(row.reply_message)
         if message:
             ticket_dialogs[row.ticket_id].append({"role": role, "message": message})
@@ -126,21 +133,25 @@ if __name__ == "__main__":
             ticket_messages[row.ticket_id] = clean_text(row.ticket_message)
         if row.ticket_id not in ticket_categories:
             ticket_categories[row.ticket_id] = row.category_title.strip()
+        if row.ticket_id not in ticket_subjects:
+            ticket_subjects[row.ticket_id] = row.subject
 
     dataset = []
     for ticket_id, messages in ticket_dialogs.items():
-        # Ищем последний ответ оператора с конца
-        idx = len(messages) - 1
-        while idx >= 0 and messages[idx]["role"] != "Оператор":
-            idx -= 1
-        if idx < 0:
-            continue  # Нет ответа оператора вообще
-        last_operator_msg = messages[idx]
+        idx = max(i for i, m in enumerate(messages) if m["role"] == "Оператор")
 
-        # Формируем диалог до этого ответа
-        dialogue = "\n".join([f"{m['role']}: {m['message']}" for m in messages[:idx]])
+        last_operator_msg = messages[idx]
+        dialogue = build_dialogue(messages, idx)
         category = ticket_categories.get(ticket_id, "неизвестно")
-        full_text = f"Категория: {category}\nПользователь: {ticket_messages.get(ticket_id, '')}\n{dialogue}Оператор: "
+        subject = ticket_subjects.get(ticket_id, "Без темы")
+        user_msg = ticket_messages.get(ticket_id, "")
+
+        full_text = (
+            f"Категория: {category}\n"
+            f"Тема: {subject}\n"
+            f"Пользователь: {user_msg}\n"
+            f"{dialogue + chr(10) if dialogue else ''}Оператор: "
+        )
 
         dataset.append(
             {
@@ -148,6 +159,8 @@ if __name__ == "__main__":
                 "label": last_operator_msg["message"],
                 "category_title": category,
                 "ticket_id": ticket_id,
+                "subject": subject,
+                "ticket_message": user_msg,
             }
         )
 
@@ -158,17 +171,3 @@ if __name__ == "__main__":
 
     with open("dialogue_dataset.json", encoding="utf-8") as f:
         raw_data = json.load(f)
-
-    unique_labels = set()
-    cleaned_data = []
-    for d in raw_data:
-        label = clean_text(d["label"])
-        if label not in unique_labels:
-            unique_labels.add(label)
-            d["label"] = label
-            cleaned_data.append(d)
-        # else:
-        #     print(f"id: {d['ticket_id']}\nОтвет: {label}")
-    with open("cleaned_dialogue_dataset.json", "w", encoding="utf-8") as f:
-        json.dump(cleaned_data, f, ensure_ascii=False, indent=2)
-    print(f"Было {len(raw_data)} примеров, стало {len(cleaned_data)} уникальных label.")

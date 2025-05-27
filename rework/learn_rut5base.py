@@ -2,6 +2,7 @@ import json
 import torch
 import matplotlib.pyplot as plt
 from sklearn.metrics import accuracy_score
+from sklearn.model_selection import train_test_split
 from transformers import (
     T5Tokenizer,
     T5ForConditionalGeneration,
@@ -9,7 +10,6 @@ from transformers import (
     Seq2SeqTrainingArguments,
     TrainerCallback,
     DataCollatorForSeq2Seq,
-    EncoderDecoderCache,
 )
 from datasets import Dataset
 from nltk.translate.bleu_score import sentence_bleu, SmoothingFunction
@@ -25,23 +25,30 @@ class LogCallback(TrainerCallback):
         self.examples = raw_data[:5]
 
     def on_evaluate(self, args, state, control, **kwargs):
-        print(f"\n=== Проверка модели на шаге {state.global_step} ===")
-        kwargs["model"].eval()
-        "Категория: {category}\nПользователь: {ticket_messages.get(ticket_id, '')}\n{dialogue}"
+        model = kwargs["model"]
+        model.eval()
+
         for ex in self.examples:
+            prompt = (
+                f"Категория: {ex.get('category_title', 'нет')}\n"
+                f"Тема: {ex.get('subject', 'нет')}\n"
+                f"Пользователь: {ex.get('ticket_message', 'нет')}"
+            )
             input_ids = self.tokenizer.encode(
-                ex["text"], return_tensors="pt", max_length=256, truncation=True
-            ).to(kwargs["model"].device)
-            outputs = kwargs["model"].generate(
+                prompt, return_tensors="pt", max_length=256, truncation=True
+            ).to(model.device)
+            outputs = model.generate(
                 input_ids,
-                max_length=64,
-                past_key_values=EncoderDecoderCache.from_legacy_cache(None),
+                max_length=64
             )
             answer = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
+
             print(f"\n[Категория]: {ex.get('category_title', 'нет')}")
-            print(f"[Входной текст]: {ex['text']}")
-            print(f"[Эталонный ответ]: {ex['label']}\n[Ответ модели]: {answer}\n")
-        kwargs["model"].train()
+            print(f"[Тема]: {ex.get('subject', 'нет')}")
+            print(f"[Первичное сообщение]: {ex.get('ticket_message', 'нет')}")
+            print(f"[Эталонный ответ]: {ex.get('label', 'нет')}")
+            print(f"[Ответ модели]: {answer}\n")
+        model.train()
 
 
 class AccuracyCallback(TrainerCallback):
@@ -156,32 +163,15 @@ def preprocess(example):
 
 # === Основной блок ===
 if __name__ == "__main__":
-    # Загрузить тестовый датасет из файла
-    with open("testset.json", encoding="utf-8") as f:
-        test_data_raw = json.load(f)
+    with open("dialogue_dataset.json", encoding="utf-8") as f:
+        full_data = json.load(f)
 
-    # with open("dialogue_dataset.json", encoding="utf-8") as f:
-    with open("cleaned_dialogue_dataset.json", encoding="utf-8") as f:
-        train_data_raw = json.load(f)
-
-    test_data = [
-        {
-            "text": f"{d['text']}",
-            "label": clean_label(d["label"]),
-            "category_title": d.get("category_title", "неизвестно"),
-        }
-        for d in test_data_raw
-    ]
-
-
-    train_data = [
-        {
-            "text": f"{d['text']}",
-            "label": clean_label(d["label"]),
-            "category_title": d.get("category_title", "неизвестно"),
-        }
-        for d in train_data_raw
-    ]
+    train_data, test_data = train_test_split(
+        full_data,
+        test_size=0.1,
+        random_state=42,
+        shuffle=True
+    )
 
     train_dataset = Dataset.from_list(train_data)
     test_dataset = Dataset.from_list(test_data)
@@ -202,7 +192,7 @@ if __name__ == "__main__":
 
     training_args = Seq2SeqTrainingArguments(
         output_dir="./rut5base-finetuned",
-        num_train_epochs=20,
+        num_train_epochs=25,
         learning_rate=1e-4,
         weight_decay=0.01,
         max_grad_norm=1.0,
@@ -211,7 +201,7 @@ if __name__ == "__main__":
         gradient_accumulation_steps=4,
         lr_scheduler_type="cosine",
         warmup_steps=200,
-        logging_steps=100,
+        logging_steps=50,
         save_strategy="epoch",
         save_total_limit=3,
         eval_strategy="epoch",
@@ -229,11 +219,10 @@ if __name__ == "__main__":
         model=model,
         args=training_args,
         train_dataset=tokenized_train,
-        # eval_dataset=tokenized_test,
-        eval_dataset=tokenized_train,
+        eval_dataset=tokenized_test,
         data_collator=data_collator,
         callbacks=[
-            LogCallback(tokenizer, train_data),
+            LogCallback(tokenizer, test_data),
             AccuracyCallback(tokenizer),
         ],
     )
