@@ -12,3 +12,4 @@ rag_answers_log.csv
 rag_debug.log
 testset.json
 cleaned_dialogue_dataset.json
+rut5small-finetuned

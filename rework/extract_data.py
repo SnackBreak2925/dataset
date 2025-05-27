@@ -141,6 +141,8 @@ if __name__ == "__main__":
         idx = max(i for i, m in enumerate(messages) if m["role"] == "Оператор")
 
         last_operator_msg = messages[idx]
+        if last_operator_msg["message"].strip() == "[URL]":
+            continue
         dialogue = build_dialogue(messages, idx)
         category = ticket_categories.get(ticket_id, "неизвестно")
         subject = ticket_subjects.get(ticket_id, "Без темы")

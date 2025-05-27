@@ -35,12 +35,9 @@ class LogCallback(TrainerCallback):
                 f"Пользователь: {ex.get('ticket_message', 'нет')}"
             )
             input_ids = self.tokenizer.encode(
-                ex['text'], return_tensors="pt", max_length=256, truncation=True
+                ex["text"], return_tensors="pt", max_length=256, truncation=True
             ).to(model.device)
-            outputs = model.generate(
-                input_ids,
-                max_length=64
-            )
+            outputs = model.generate(input_ids, max_length=64)
             answer = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
 
             print(f"\n[Категория]: {ex.get('category_title', 'нет')}")
@@ -168,17 +165,14 @@ if __name__ == "__main__":
         full_data = json.load(f)
 
     train_data, test_data = train_test_split(
-        full_data,
-        test_size=0.1,
-        random_state=42,
-        shuffle=True
+        full_data, test_size=0.1, random_state=42, shuffle=True
     )
 
     train_dataset = Dataset.from_list(train_data)
     test_dataset = Dataset.from_list(test_data)
 
-    model = T5ForConditionalGeneration.from_pretrained("cointegrated/rut5-base")
-    tokenizer = T5Tokenizer.from_pretrained("cointegrated/rut5-base", legacy=False)
+    model = T5ForConditionalGeneration.from_pretrained("cointegrated/rut5-small")
+    tokenizer = T5Tokenizer.from_pretrained("cointegrated/rut5-small", legacy=False)
 
     freeze_encoder(model, unfreeze_last_n=2)
 
@@ -188,11 +182,12 @@ if __name__ == "__main__":
     tokenized_train = train_dataset.map(
         preprocess, remove_columns=train_dataset.column_names
     )
-    tokenized_test = test_dataset.map(preprocess, remove_columns=test_dataset.column_names)
-
+    tokenized_test = test_dataset.map(
+        preprocess, remove_columns=test_dataset.column_names
+    )
 
     training_args = Seq2SeqTrainingArguments(
-        output_dir="./rut5base-finetuned",
+        output_dir="./rut5small-finetuned",
         num_train_epochs=10,
         learning_rate=5e-5,
         weight_decay=0.01,
@@ -230,8 +225,8 @@ if __name__ == "__main__":
 
     trainer.train()
 
-    trainer.save_model("./rut5base-finetuned")
-    tokenizer.save_pretrained("./rut5base-finetuned")
+    trainer.save_model("./rut5small-finetuned")
+    tokenizer.save_pretrained("./rut5small-finetuned")
     print("\n✅ Обучение завершено и модель сохранена")
 
     # === Графики ===
@@ -323,7 +318,7 @@ if __name__ == "__main__":
 
     plt.tight_layout()
     os.makedirs("train_results", exist_ok=True)
-    plt.savefig("train_results/metrics.png")
+    plt.savefig("train_results/metrics-rut5-small.png")
     plt.show()
 
-    print("\n📊 Графики сохранены в train_results/metrics-rut5-base.png")
+    print("\n📊 Графики сохранены в train_results/metrics.png")
