@@ -9,6 +9,14 @@ import html
 
 EMAIL_REGEX = r'(([^<>()\[\]\\.,;:\s@"]+(\.[^<>()\[\]\\.,;:\s@"]+)*)|(".+"))@((\[[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}])|(([a-zA-Z\-0-9]+\.)+[a-zA-Z]{2,}))'
 URL_REGEX = r"https?:\/\/(www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b([-a-zA-Z0-9()!@:%_\+.~#?&\/\/=]*)"
+LOGIN_REGEX = r'(логин|login)[^\wа-яё]*:?\s*([\w.@!#$%^&*()_+=\-\[\]{}:;"\'<>.,?/~]+)'
+PASSWORD_REGEX = (
+    r'(пароль|password)[^\wа-яё]*:?\s*([\w!@#$%^&*()_+=\-\[\]{}:;"\'<>.,?/~]+)'
+)
+IGNORE_GROUP_PATTERN = re.compile(
+    r"\((\s*логин\s*(?:и|или|,|/)?\s*пароль\s*|\s*пароль\s*(?:и|или|,|/)?\s*логин\s*)\)",
+    flags=re.IGNORECASE,
+)
 
 
 def load_db_config():
@@ -74,6 +82,40 @@ def clean_text(text_data):
     ]
     for pat, repl in substitutions:
         text = re.sub(pat, repl, text, flags=re.IGNORECASE)
+
+    ignore_spans = [m.span() for m in IGNORE_GROUP_PATTERN.finditer(text)]
+
+    def in_ignore_spans(pos):
+        for s, e in ignore_spans:
+            if pos >= s and pos < e:
+                return True
+        return False
+
+    def mask_login(match):
+        start = match.start(1)
+        if in_ignore_spans(start):
+            return match.group(0)
+        value = match.group(2).strip()
+        if value.upper() in ("[LOGIN]", "[EMAIL]") or (
+            match.end(2) < len(match.string) and match.string[match.end(2)] == "]"
+        ):
+            return match.group(0)
+        return f"{match.group(1)}: [LOGIN]"
+
+    def mask_password(match):
+        start = match.start(1)
+        if in_ignore_spans(start):
+            return match.group(0)
+        value = match.group(2).strip()
+        if value.upper() == "[PASSWORD]" or (
+            match.end(2) < len(match.string) and match.string[match.end(2)] == "]"
+        ):
+            return match.group(0)
+        return f"{match.group(1)}: [PASSWORD]"
+
+    text = re.sub(LOGIN_REGEX, mask_login, text, flags=re.IGNORECASE)
+    text = re.sub(PASSWORD_REGEX, mask_password, text, flags=re.IGNORECASE)
+    text = re.sub(r"\s{2,}", " ", text)
     return text.strip()
 
 
@@ -141,7 +183,10 @@ if __name__ == "__main__":
         idx = max(i for i, m in enumerate(messages) if m["role"] == "Оператор")
 
         last_operator_msg = messages[idx]
-        if last_operator_msg["message"].strip() == "[URL]":
+        if (
+            last_operator_msg["message"].strip() == "[URL]"
+            or last_operator_msg["message"].strip() == "[URL] [URL]"
+        ):
             continue
         dialogue = build_dialogue(messages, idx)
         category = ticket_categories.get(ticket_id, "неизвестно")
