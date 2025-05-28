@@ -35,18 +35,16 @@ class LogCallback(TrainerCallback):
                 f"Пользователь: {ex.get('ticket_message', 'нет')}"
             )
             input_ids = self.tokenizer.encode(
-                ex['text'], return_tensors="pt", max_length=256, truncation=True
+                prompt, return_tensors="pt", max_length=256, truncation=True
             ).to(model.device)
-            outputs = model.generate(
-                input_ids,
-                max_length=64
-            )
+            outputs = model.generate(input_ids, max_length=64)
             answer = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
 
             print(f"\n[Категория]: {ex.get('category_title', 'нет')}")
             print(f"[Тема]: {ex.get('subject', 'нет')}")
             print(f"[Первичное сообщение]: {ex.get('ticket_message', 'нет')}")
-            print(f"[Вхождной текст]: {ex['text']}")
+            print(f"[Промт]: {prompt}")
+            print(f"[Входной текст]: {ex['text']}")
             print(f"[Эталонный ответ]: {ex.get('label', 'нет')}")
             print(f"[Ответ модели]: {answer}\n")
         model.train()
@@ -140,8 +138,7 @@ def clean_label(text):
 
 # === Препроцессинг ===
 def preprocess(example):
-    category = example.get("category_title", "неизвестно")
-    input_text = f"Категория: {category}\n{example['text']}"
+    input_text = example['text']
     cleaned_label = clean_label(example["label"])
     tokenized = tokenizer(
         input_text,
@@ -168,10 +165,7 @@ if __name__ == "__main__":
         full_data = json.load(f)
 
     train_data, test_data = train_test_split(
-        full_data,
-        test_size=0.1,
-        random_state=42,
-        shuffle=True
+        full_data, test_size=0.1, random_state=24, shuffle=True
     )
 
     train_dataset = Dataset.from_list(train_data)
@@ -188,13 +182,14 @@ if __name__ == "__main__":
     tokenized_train = train_dataset.map(
         preprocess, remove_columns=train_dataset.column_names
     )
-    tokenized_test = test_dataset.map(preprocess, remove_columns=test_dataset.column_names)
-
+    tokenized_test = test_dataset.map(
+        preprocess, remove_columns=test_dataset.column_names
+    )
 
     training_args = Seq2SeqTrainingArguments(
         output_dir="./rut5base-finetuned",
-        num_train_epochs=10,
-        learning_rate=5e-5,
+        num_train_epochs=30,
+        learning_rate=1e-4,
         weight_decay=0.01,
         max_grad_norm=1.0,
         per_device_train_batch_size=4,
@@ -202,7 +197,7 @@ if __name__ == "__main__":
         gradient_accumulation_steps=4,
         lr_scheduler_type="cosine",
         warmup_steps=200,
-        logging_steps=50,
+        logging_strategy="epoch",
         save_strategy="epoch",
         save_total_limit=3,
         eval_strategy="epoch",
