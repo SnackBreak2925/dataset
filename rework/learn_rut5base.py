@@ -1,116 +1,18 @@
 import json
-import torch
 import matplotlib.pyplot as plt
-from sklearn.metrics import accuracy_score
 from sklearn.model_selection import train_test_split
 from transformers import (
     T5Tokenizer,
     T5ForConditionalGeneration,
     Seq2SeqTrainer,
     Seq2SeqTrainingArguments,
-    TrainerCallback,
     DataCollatorForSeq2Seq,
 )
 from datasets import Dataset
-from nltk.translate.bleu_score import sentence_bleu, SmoothingFunction
-from rouge_score import rouge_scorer
 import os
 import re
 
-
-# === Кастомные Callbacks ===
-class LogCallback(TrainerCallback):
-    def __init__(self, tokenizer, raw_data):
-        self.tokenizer = tokenizer
-        self.examples = raw_data[:5]
-
-    def on_evaluate(self, args, state, control, **kwargs):
-        model = kwargs["model"]
-        model.eval()
-
-        for ex in self.examples:
-            prompt = (
-                f"Категория: {ex.get('category_title', 'нет')}\n"
-                f"Тема: {ex.get('subject', 'нет')}\n"
-                f"Пользователь: {ex.get('ticket_message', 'нет')}"
-            )
-            input_ids = self.tokenizer.encode(
-                prompt, return_tensors="pt", max_length=256, truncation=True
-            ).to(model.device)
-            outputs = model.generate(input_ids, max_length=64)
-            answer = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
-
-            print(f"\n[Категория]: {ex.get('category_title', 'нет')}")
-            print(f"[Тема]: {ex.get('subject', 'нет')}")
-            print(f"[Первичное сообщение]: {ex.get('ticket_message', 'нет')}")
-            print(f"[Промт]: {prompt}")
-            print(f"[Входной текст]: {ex['text']}")
-            print(f"[Эталонный ответ]: {ex.get('label', 'нет')}")
-            print(f"[Ответ модели]: {answer}\n")
-        model.train()
-
-
-class AccuracyCallback(TrainerCallback):
-    def __init__(self, tokenizer):
-        self.tokenizer = tokenizer
-        self.rouge = rouge_scorer.RougeScorer(["rouge1", "rougeL"], use_stemmer=True)
-        self.smooth = SmoothingFunction().method1
-
-    def on_evaluate(self, args, state, control, **kwargs):
-        print(f"\nЭпоха {state.epoch} завершена!")
-        model = kwargs["model"]
-        eval_dataloader = kwargs["eval_dataloader"]
-        model.eval()
-        preds, labels = [], []
-        rouge1_list, rougeL_list, bleu_list = [], [], []
-
-        for batch in eval_dataloader:
-            input_ids = batch["input_ids"].to(model.device)
-            attention_mask = batch["attention_mask"].to(model.device)
-            label_ids = batch["labels"].to(model.device)
-
-            with torch.no_grad():
-                outputs = model.generate(
-                    input_ids, attention_mask=attention_mask, max_length=64
-                )
-
-            decoded_preds = self.tokenizer.batch_decode(
-                outputs, skip_special_tokens=True
-            )
-            decoded_labels = self.tokenizer.batch_decode(
-                label_ids, skip_special_tokens=True
-            )
-
-            preds.extend(decoded_preds)
-            labels.extend(decoded_labels)
-
-            for pred, ref in zip(decoded_preds, decoded_labels):
-                rs = self.rouge.score(ref, pred)
-                rouge1_list.append(rs["rouge1"].fmeasure)
-                rougeL_list.append(rs["rougeL"].fmeasure)
-                bleu_list.append(
-                    sentence_bleu(
-                        [ref.split()], pred.split(), smoothing_function=self.smooth
-                    )
-                )
-
-        acc = accuracy_score(labels, preds)
-        rouge1 = sum(rouge1_list) / len(rouge1_list)
-        rougeL = sum(rougeL_list) / len(rougeL_list)
-        bleu = sum(bleu_list) / len(bleu_list)
-
-        print(f"\n✅ Accuracy @ step {state.global_step}: {acc:.4f}")
-        print(f"📊 ROUGE-1: {rouge1:.4f}, ROUGE-L: {rougeL:.4f}, BLEU: {bleu:.4f}")
-
-        state.log_history.append(
-            {
-                "step": state.global_step,
-                "accuracy": acc,
-                "rouge1": rouge1,
-                "rougeL": rougeL,
-                "bleu": bleu,
-            }
-        )
+from callbacks import AccuracyCallback, LogCallback
 
 
 def freeze_encoder(model, unfreeze_last_n=2):
@@ -121,10 +23,12 @@ def freeze_encoder(model, unfreeze_last_n=2):
             param.requires_grad = requires_grad
 
 
-def freeze_decoder_layers(model, num_layers=6):
-    for i in range(num_layers):
-        for param in model.decoder.block[i].parameters():
-            param.requires_grad = False
+def freeze_decoder(model, unfreeze_last_n=2):
+    total_layers = len(model.decoder.block)
+    for i, block in enumerate(model.decoder.block):
+        requires_grad = i >= total_layers - unfreeze_last_n
+        for param in block.parameters():
+            param.requires_grad = requires_grad
 
 
 # === Очистка и нормализация ответа ===
@@ -138,7 +42,7 @@ def clean_label(text):
 
 # === Препроцессинг ===
 def preprocess(example):
-    input_text = example['text']
+    input_text = example["text"]
     cleaned_label = clean_label(example["label"])
     tokenized = tokenizer(
         input_text,
@@ -175,6 +79,7 @@ if __name__ == "__main__":
     tokenizer = T5Tokenizer.from_pretrained("cointegrated/rut5-base", legacy=False)
 
     freeze_encoder(model, unfreeze_last_n=2)
+    freeze_decoder(model, unfreeze_last_n=2)
 
     max_input = 256
     max_output = 64
@@ -188,25 +93,22 @@ if __name__ == "__main__":
 
     training_args = Seq2SeqTrainingArguments(
         output_dir="./rut5base-finetuned",
-        num_train_epochs=30,
-        learning_rate=1e-4,
-        weight_decay=0.01,
-        max_grad_norm=1.0,
-        per_device_train_batch_size=4,
-        per_device_eval_batch_size=4,
-        gradient_accumulation_steps=4,
+        num_train_epochs=10,
+        learning_rate=3e-4,
+        weight_decay=0.02,
+        per_device_train_batch_size=8,
+        per_device_eval_batch_size=8,
         lr_scheduler_type="cosine",
         warmup_steps=200,
         logging_strategy="epoch",
         save_strategy="epoch",
-        save_total_limit=3,
         eval_strategy="epoch",
+        save_total_limit=3,
         do_eval=True,
         logging_dir="./runs",
         fp16=False,
         bf16=False,
         report_to="none",
-        label_smoothing_factor=0.1,
     )
 
     data_collator = DataCollatorForSeq2Seq(tokenizer=tokenizer, model=model)
@@ -318,7 +220,6 @@ if __name__ == "__main__":
 
     plt.tight_layout()
     os.makedirs("train_results", exist_ok=True)
-    plt.savefig("train_results/metrics.png")
-    plt.show()
+    plt.savefig("train_results/metrics-rut5-base.png")
 
     print("\n📊 Графики сохранены в train_results/metrics-rut5-base.png")
