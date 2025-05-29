@@ -4,6 +4,7 @@ from transformers import TrainerCallback
 from nltk.translate.bleu_score import sentence_bleu, SmoothingFunction
 from rouge_score import rouge_scorer
 from tqdm import tqdm
+from bert_score import score as bertscore_score
 
 import nltk
 
@@ -54,12 +55,13 @@ class LogCallback(TrainerCallback):
 
 
 class AccuracyCallback(TrainerCallback):
-    def __init__(self, tokenizer):
+    def __init__(self, tokenizer, init_timestamp, model_name):
         self.tokenizer = tokenizer
+        self.init_timestamp = init_timestamp
+        self.model_name = model_name
         self.rouge = rouge_scorer.RougeScorer(["rouge1", "rougeL"], use_stemmer=True)
         self.smooth = SmoothingFunction().method1
 
-        # Добавляем импортируемые метрики:
         from nltk.translate.meteor_score import meteor_score
         from sacrebleu.metrics import CHRF
         import Levenshtein
@@ -80,7 +82,9 @@ class AccuracyCallback(TrainerCallback):
         import csv
         import os
 
-        self.metrics_logfile = "metrics_log.csv"
+        self.metrics_logfile = (
+            f"logs/metrics-log-{self.model_name}-{self.init_timestamp}.csv"
+        )
 
         model = kwargs["model"]
         eval_dataloader = kwargs["eval_dataloader"]
@@ -97,7 +101,11 @@ class AccuracyCallback(TrainerCallback):
         ) = [], [], [], [], [], [], []
         masked_accs = []
 
-        for batch in eval_dataloader:
+        # Для batch обработки всех beam'ов для bertscore
+        all_preds_for_bertscore = []
+        all_refs_for_bertscore = []
+
+        for batch in tqdm(eval_dataloader, desc="Валидация (батчи)"):
             input_ids = batch["input_ids"].to(model.device)
             attention_mask = batch["attention_mask"].to(model.device)
             label_ids = batch["labels"].to(model.device)
@@ -130,40 +138,27 @@ class AccuracyCallback(TrainerCallback):
                 ref = decoded_labels[i]
                 beams = decoded_preds[i * num_beams : (i + 1) * num_beams]
 
-                best_rouge1 = best_rougeL = best_bleu = best_meteor = best_chrf = (
-                    best_fuzzy
-                ) = best_lenratio = 0
                 for pred in beams:
+                    # Собираем все beam-ответы для bertscore (потом батчем)
+                    all_preds_for_bertscore.append(pred)
+                    all_refs_for_bertscore.append(ref)
+
                     rs = self.rouge.score(ref, pred)
-                    curr_rouge1 = rs["rouge1"].fmeasure
-                    curr_rougeL = rs["rougeL"].fmeasure
-                    curr_bleu = sentence_bleu(
-                        [ref.split()], pred.split(), smoothing_function=self.smooth
+                    rouge1_list.append(rs["rouge1"].fmeasure)
+                    rougeL_list.append(rs["rougeL"].fmeasure)
+                    bleu_list.append(
+                        sentence_bleu(
+                            [ref.split()], pred.split(), smoothing_function=self.smooth
+                        )
                     )
-                    curr_meteor = self.meteor_score([ref.split()], pred.split())
-                    curr_chrf = (
+                    meteor_list.append(self.meteor_score([ref.split()], pred.split()))
+                    chrf_list.append(
                         self.chrf_metric.sentence_score(pred, [ref]).score / 100.0
                     )
-                    curr_fuzzy = self.Levenshtein.ratio(pred, ref)
-                    curr_lenratio = len(pred) / (len(ref) + 1e-8)
-
-                    best_rouge1 = max(best_rouge1, curr_rouge1)
-                    best_rougeL = max(best_rougeL, curr_rougeL)
-                    best_bleu = max(best_bleu, curr_bleu)
-                    best_meteor = max(best_meteor, curr_meteor)
-                    best_chrf = max(best_chrf, curr_chrf)
-                    best_fuzzy = max(best_fuzzy, curr_fuzzy)
-                    best_lenratio = max(best_lenratio, curr_lenratio)
-
-                rouge1_list.append(best_rouge1)
-                rougeL_list.append(best_rougeL)
-                bleu_list.append(best_bleu)
-                meteor_list.append(best_meteor)
-                chrf_list.append(best_chrf)
-                fuzzy_list.append(best_fuzzy)
-                lenratio_list.append(best_lenratio)
-                preds.append(beams[0])
-                labels.append(ref)
+                    fuzzy_list.append(self.Levenshtein.ratio(pred, ref))
+                    lenratio_list.append(len(pred) / (len(ref) + 1e-8))
+                    preds.append(pred)
+                    labels.append(ref)
 
         acc = accuracy_score(labels, preds)
         rouge1 = sum(rouge1_list) / len(rouge1_list)
@@ -175,12 +170,25 @@ class AccuracyCallback(TrainerCallback):
         fuzzy = sum(fuzzy_list) / len(fuzzy_list)
         len_ratio = sum(lenratio_list) / len(lenratio_list)
 
+        try:
+            P, R, F1 = bertscore_score(
+                all_preds_for_bertscore,
+                all_refs_for_bertscore,
+                lang="ru",
+                model_type="xlm-roberta-base",
+            )
+            bertscore_f1 = float(F1.mean())
+        except Exception as e:
+            tqdm.write(f"BERTScore failed: {e}")
+            bertscore_f1 = 0.0
+
         tqdm.write(f"✅ Accuracy @ step {state.global_step}: {acc:.4f}")
         tqdm.write(f"📊 ROUGE-1: {rouge1:.4f}, ROUGE-L: {rougeL:.4f}, BLEU: {bleu:.4f}")
         tqdm.write(
             f"🌟 METEOR: {meteor:.4f}, chrF: {chrf:.4f}, Fuzzy: {fuzzy:.4f}, Length ratio: {len_ratio:.4f}"
         )
         tqdm.write(f"🟢 Masked accuracy: {masked_acc:.4f}")
+        tqdm.write(f"🧠 BERTScore(F1) (all beams): {bertscore_f1:.4f}")
         tqdm.write(f"Эпоха {state.epoch} завершена!")
 
         # Сохраняем все метрики в csv
@@ -196,7 +204,27 @@ class AccuracyCallback(TrainerCallback):
             "chrf": chrf,
             "fuzzy": fuzzy,
             "len_ratio": len_ratio,
+            "bertscore_f1": bertscore_f1,
         }
+        last_train_log = next(
+            (log for log in reversed(state.log_history) if "loss" in log), {}
+        )
+        last_eval_log = next(
+            (log for log in reversed(state.log_history) if "eval_loss" in log), {}
+        )
+
+        metrics_row.update(
+            {
+                "train_loss": last_train_log.get("loss"),
+                "grad_norm": last_train_log.get("grad_norm"),
+                "learning_rate": last_train_log.get("learning_rate"),
+                "eval_loss": last_eval_log.get("eval_loss"),
+                "eval_runtime": last_eval_log.get("eval_runtime"),
+                "eval_samples_per_second": last_eval_log.get("eval_samples_per_second"),
+                "eval_steps_per_second": last_eval_log.get("eval_steps_per_second"),
+            }
+        )
+
         log_exists = os.path.exists(self.metrics_logfile)
         with open(self.metrics_logfile, "a", newline="") as f:
             writer = csv.DictWriter(f, fieldnames=metrics_row.keys())

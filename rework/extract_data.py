@@ -96,9 +96,23 @@ def clean_text(text_data):
         if in_ignore_spans(start):
             return match.group(0)
         value = match.group(2).strip()
+        s = match.string
+        pos = match.start(1)
+        left_context = s[pos - 1] if pos > 0 else ""
+        right_context = s[match.end(2)] if match.end(2) < len(s) else ""
+        # Не маскируем если value — это просто союз или разделитель, либо value пустой
+        if not value or value in ("и", "или", "/", ",", "и/или"):
+            return match.group(0)
+        if left_context in "\"'«" or right_context in "\"'»":
+            return match.group(0)
+        if len(value.split()) > 1:
+            return match.group(0)
         if value.upper() in ("[LOGIN]", "[EMAIL]") or (
             match.end(2) < len(match.string) and match.string[match.end(2)] == "]"
         ):
+            return match.group(0)
+        # Доработка — если значение начинается с большой буквы (и короткое), не маскировать (скорее всего это подпись)
+        if value in {"С", "С уважением"} or (value.istitle() and len(value) <= 3):
             return match.group(0)
         return f"{match.group(1)}: [LOGIN]"
 
@@ -107,9 +121,22 @@ def clean_text(text_data):
         if in_ignore_spans(start):
             return match.group(0)
         value = match.group(2).strip()
+        s = match.string
+        pos = match.start(1)
+        left_context = s[pos - 1] if pos > 0 else ""
+        right_context = s[match.end(2)] if match.end(2) < len(s) else ""
+        if not value or value in ("и", "или", "/", ",", "и/или"):
+            return match.group(0)
+        if left_context in "\"'«" or right_context in "\"'»":
+            return match.group(0)
+        if len(value.split()) > 1:
+            return match.group(0)
         if value.upper() == "[PASSWORD]" or (
             match.end(2) < len(match.string) and match.string[match.end(2)] == "]"
         ):
+            return match.group(0)
+        # Доработка — если после "пароль" идёт "С уважением" или "С", не маскировать!
+        if value in {"С", "С уважением"} or (value.istitle() and len(value) <= 3):
             return match.group(0)
         return f"{match.group(1)}: [PASSWORD]"
 
@@ -151,6 +178,13 @@ if __name__ == "__main__":
     staff_signatures = dict(
         zip(filtered_signatures_df["id"], filtered_signatures_df["signature"])
     )
+
+    manual_signatures = {
+        21: "С уважением, начальник отдела сопровождения и поддержки Попков Александр Юрьевич",
+        26: "Юлия Митузина Отдел сопровождения и поддержки Центра разработки и внедрения Тел.: (3822) 900-157, внутр. 1130",
+    }
+
+    staff_signatures.update(manual_signatures)
 
     replies_df = replies_df.fillna("")
 

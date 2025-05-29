@@ -195,6 +195,28 @@ tests = ["cloudpickle ; platform_python_implementation == \"CPython\"", "hypothe
 tests-mypy = ["mypy (>=1.11.1) ; platform_python_implementation == \"CPython\" and python_version >= \"3.10\"", "pytest-mypy-plugins ; platform_python_implementation == \"CPython\" and python_version >= \"3.10\""]
 
 [[package]]
+name = "bert-score"
+version = "0.3.13"
+description = "PyTorch implementation of BERT score"
+optional = false
+python-versions = ">=3.6"
+groups = ["main"]
+files = [
+    {file = "bert_score-0.3.13-py3-none-any.whl", hash = "sha256:bbbb4c7fcdaa46d7681aff49f37f96faa09ed74e1b150e659bdc6b58a66989b9"},
+    {file = "bert_score-0.3.13.tar.gz", hash = "sha256:8ffe5838eac8cdd988b8b1a896af7f49071188c8c011a1ed160d71a9899a2ba4"},
+]
+
+[package.dependencies]
+matplotlib = "*"
+numpy = "*"
+packaging = ">=20.9"
+pandas = ">=1.0.1"
+requests = "*"
+torch = ">=1.0.0"
+tqdm = ">=4.31.1"
+transformers = ">=3.0.0"
+
+[[package]]
 name = "certifi"
 version = "2025.1.31"
 description = "Python package for providing Mozilla's CA Bundle."
@@ -3658,4 +3680,4 @@ propcache = ">=0.2.1"
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<4.0"
-content-hash = "77c43393cc1b0119af0f563925703df0e730f83d143291fae420563b4eb7c5c3"
+content-hash = "9fed30afa22a3149b0b3129c913ab3a208ceefb5387fc750b1e77613459cc836"
