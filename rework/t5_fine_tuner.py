@@ -13,6 +13,7 @@ from datasets import Dataset
 
 from metrics_plotter import MetricsPlotter
 from callbacks import AccuracyCallback, LogCallback
+from dual_logger import DualLogger
 
 
 class T5FineTuner:
@@ -41,6 +42,8 @@ class T5FineTuner:
         self.kwargs = kwargs
 
         self.init_timestamp = int(time.time())
+        import sys
+        sys.stdout = DualLogger(self.model_short_name(), self.init_timestamp)
 
     def model_short_name(self):
         return self.model_name.split("/")[-1]

@@ -27,7 +27,8 @@ class LogCallback(TrainerCallback):
             prompt = (
                 f"Категория: {ex.get('category_title', 'нет')}\n"
                 f"Тема: {ex.get('subject', 'нет')}\n"
-                f"Пользователь: {ex.get('ticket_message', 'нет')}"
+                f"Пользователь: {ex.get('ticket_message', 'нет')}\n"
+                "Оператор: "
             )
             input_ids = self.tokenizer.encode(
                 prompt, return_tensors="pt", max_length=256, truncation=True
@@ -40,17 +41,13 @@ class LogCallback(TrainerCallback):
                 early_stopping=True,
             )
             tqdm.write("=" * 100)
-            tqdm.write(f"[Категория]: {ex.get('category_title', 'нет')}")
-            tqdm.write(f"[Тема]: {ex.get('subject', 'нет')}")
-            tqdm.write(f"[Первичное сообщение]: {ex.get('ticket_message', 'нет')}")
-            tqdm.write(f"[Промт]: {prompt}")
             tqdm.write(f"[Входной текст]: {ex['text']}")
+            tqdm.write(f"[Промт]: {prompt}")
             tqdm.write(f"[Эталонный ответ]: {ex.get('label', 'нет')}")
             for i, output in enumerate(outputs):
                 answer = self.tokenizer.decode(output, skip_special_tokens=True)
-                tqdm.write(f"\n[Beam {i + 1}]: {answer}")
+                tqdm.write(f"[Beam {i + 1}]: {answer}")
             tqdm.write("=" * 100)
-            tqdm.write("")
         model.train()
 
 
@@ -101,7 +98,6 @@ class AccuracyCallback(TrainerCallback):
         ) = [], [], [], [], [], [], []
         masked_accs = []
 
-        # Для batch обработки всех beam'ов для bertscore
         all_preds_for_bertscore = []
         all_refs_for_bertscore = []
 

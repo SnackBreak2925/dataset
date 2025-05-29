@@ -79,6 +79,7 @@ def clean_text(text_data):
         (r"[\r\n]+", " "),
         (r"\s{2,}", " "),
         (r"\s+\.", "."),
+        (r"(?:\[URL\]\s*){2,}", "[URL] "),
     ]
     for pat, repl in substitutions:
         text = re.sub(pat, repl, text, flags=re.IGNORECASE)
@@ -161,6 +162,12 @@ def build_dialogue(messages, upto_idx):
         return ""
     return "\n".join(f"{m['role']}: {m['message']}" for m in messages[:upto_idx])
 
+def normalize_label(text):
+    text = text.strip()
+    text = text.replace(". [URL]", " [URL]")
+    text = re.sub(r"\s+", " ", text)
+    return text
+
 
 if __name__ == "__main__":
     engine = get_engine()
@@ -212,15 +219,22 @@ if __name__ == "__main__":
         if row.ticket_id not in ticket_subjects:
             ticket_subjects[row.ticket_id] = row.subject
 
+    unwanted_labels = {
+        "Здравствуйте! [URL]",
+        "Здравствуйте! [URL] [URL]",
+        "Добрый день! [URL]",
+        "Добрый день! [URL] [URL]",
+        "[URL]",
+        "[URL] [URL]",
+    }
+
     dataset = []
     for ticket_id, messages in ticket_dialogs.items():
         idx = max(i for i, m in enumerate(messages) if m["role"] == "Оператор")
 
         last_operator_msg = messages[idx]
-        if (
-            last_operator_msg["message"].strip() == "[URL]"
-            or last_operator_msg["message"].strip() == "[URL] [URL]"
-        ):
+        label = normalize_label(last_operator_msg["message"].strip())
+        if label.strip() in unwanted_labels:
             continue
         dialogue = build_dialogue(messages, idx)
         category = ticket_categories.get(ticket_id, "неизвестно")
@@ -237,7 +251,7 @@ if __name__ == "__main__":
         dataset.append(
             {
                 "text": full_text,
-                "label": last_operator_msg["message"],
+                "label": label,
                 "category_title": category,
                 "ticket_id": ticket_id,
                 "subject": subject,
@@ -249,6 +263,3 @@ if __name__ == "__main__":
         json.dump(dataset, f, ensure_ascii=False, indent=2)
 
     print(f"✅ Сохранено {len(dataset)} диалогов в dialogue_dataset.json")
-
-    with open("dialogue_dataset.json", encoding="utf-8") as f:
-        raw_data = json.load(f)

@@ -6,7 +6,7 @@ if __name__ == "__main__":
         dataset_path="dialogue_dataset.json",
         output_dir="./rut5base-finetuned",
         trainer_args={
-            "num_train_epochs": 10,
+            "num_train_epochs": 20,
             "learning_rate": 1e-4,
         },
     )
