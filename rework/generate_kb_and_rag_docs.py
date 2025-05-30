@@ -4,7 +4,10 @@
 import os
 import json
 from collections import defaultdict
+import re
 
+def remove_operator_suffix(text):
+    return re.sub(r"Оператор\s*:\s*$", "", text.strip(), flags=re.IGNORECASE)
 
 def generate_kb_and_rag_docs(
     dataset_path="dialogue_dataset.json",
@@ -27,7 +30,7 @@ def generate_kb_and_rag_docs(
     for i, entry in enumerate(data):
         category = entry.get("category_title", "неизвестно").strip()
         context = entry["label"].strip()
-        question = entry["text"].strip()
+        question = remove_operator_suffix(entry["text"])
 
         kb_by_category[category].add(context)
 

@@ -138,7 +138,6 @@ class AccuracyCallback(TrainerCallback):
                 beams = decoded_preds[i * num_beams : (i + 1) * num_beams]
 
                 for pred in beams:
-                    # Собираем все beam-ответы для bertscore (потом батчем)
                     all_preds_for_bertscore.append(pred)
                     all_refs_for_bertscore.append(ref)
 
@@ -201,12 +200,12 @@ class AccuracyCallback(TrainerCallback):
         tqdm.write(f"🟢 Masked accuracy: {masked_acc:.4f}")
         tqdm.write(f"🧠 BERTScore(F1) (all beams): {bertscore_f1:.4f}")
         tqdm.write(f"🟡 Semantic similarity (MiniLM): {avg_semantic_similarity:.4f}")
-        tqdm.write(f"Эпоха {state.epoch} завершена!")
+        epoch = state.epoch or 0.0
+        tqdm.write(f"Эпоха {epoch} завершена!")
 
-        # Сохраняем все метрики в csv
         metrics_row = {
             "step": state.global_step,
-            "epoch": state.epoch,
+            "epoch": epoch,
             "accuracy": acc,
             "rouge1": rouge1,
             "rougeL": rougeL,
@@ -217,7 +216,7 @@ class AccuracyCallback(TrainerCallback):
             "fuzzy": fuzzy,
             "len_ratio": len_ratio,
             "bertscore_f1": bertscore_f1,
-            "semantic_similarity": avg_semantic_similarity
+            "semantic_similarity": avg_semantic_similarity,
         }
         last_train_log = next(
             (log for log in reversed(state.log_history) if "loss" in log), {}

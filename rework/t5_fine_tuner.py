@@ -155,7 +155,9 @@ class T5FineTuner:
             callbacks=[
                 LogCallback(self.tokenizer, test_data),
                 AccuracyCallback(
-                    self.tokenizer, self.init_timestamp, self.model_short_name()
+                    self.tokenizer,
+                    self.init_timestamp,
+                    self.model_short_name(),
                 ),
             ],
             **self.kwargs,

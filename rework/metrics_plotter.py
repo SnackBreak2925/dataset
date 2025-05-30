@@ -100,8 +100,8 @@ class MetricsPlotter:
                 print(f"⚠️ Нет метрики '{metric}' в логах")
                 continue
             plt.figure(figsize=(8, 5))
-            x = [0] + list(df[x_axis])
-            y = [0] + list(df[metric])
+            x = list(df[x_axis])
+            y = list(df[metric])
             plt.plot(x, y, marker="o", label=metric)
             plt.title(metric)
             plt.xlabel(x_axis.capitalize())
@@ -112,7 +112,7 @@ class MetricsPlotter:
             if metric in PERCENT_METRICS:
                 plt.ylim(bottom=0, top=1.0)
             else:
-                y_max = max([0] + [v for v in y if pd.notnull(v)])
+                y_max = max([v for v in y if pd.notnull(v)])
                 plt.ylim(bottom=0, top=self.nice_ceil(y_max))
             out_file = os.path.join(
                 out_dir, f"{metric}-{model_name}-{init_timestamp}.png"

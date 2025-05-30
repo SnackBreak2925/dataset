@@ -7,7 +7,7 @@ if __name__ == "__main__":
         output_dir="./rut5small-finetuned",
         trainer_args={
             "num_train_epochs": 30,
-            "learning_rate": 5e-5,
+            "learning_rate": 9e-5,
         },
     )
     finetuner.run()

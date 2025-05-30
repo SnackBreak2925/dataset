@@ -59,7 +59,7 @@ print(f"📚 Загружено категорий: {len(category_kbs)}\n")
 # ============ Хелперы ==========
 def safe_encode(text):
     try:
-        return retriever.encode(text, convert_to_tensor=True)
+        return retriever.encode(text, convert_to_tensor=True, show_progress_bar=False)
     except Exception as e:
         logger.exception("Ошибка encode: %s", e)
         return None
@@ -160,33 +160,34 @@ def log_to_csv(category, question, results):
             )
 
 
-# ============ Интерактив ==========
-print("Введите запрос (или 'exit'):")
-while True:
-    question = input("Запрос: ").strip()
-    if question.lower() in {"exit", "quit"}:
-        print("До свидания!")
-        break
-    if not question:
-        print("❗ Вопрос не должен быть пустым.")
-        continue
+if __name__ == "__main__":
+    # ============ Интерактив ==========
+    print("Введите запрос (или 'exit'):")
+    while True:
+        question = input("Запрос: ").strip()
+        if question.lower() in {"exit", "quit"}:
+            print("До свидания!")
+            break
+        if not question:
+            print("❗ Вопрос не должен быть пустым.")
+            continue
 
-    category = auto_detect_category(question)
-    if not category:
-        print("❌ Не удалось определить категорию запроса.")
-        continue
+        category = auto_detect_category(question)
+        if not category:
+            print("❌ Не удалось определить категорию запроса.")
+            continue
 
-    print(f"📂 Категория определена: {category}")
-    answers, results = generate_with_contexts(category, question, top_k=TOP_K)
-    if results:
-        log_to_csv(category, question, results)
-    if not results:
-        print("ℹ️ Ответы были сгенерированы, но все отфильтрованы.")
+        print(f"📂 Категория определена: {category}")
+        answers, results = generate_with_contexts(category, question, top_k=TOP_K)
+        if results:
+            log_to_csv(category, question, results)
+        if not results:
+            print("ℹ️ Ответы были сгенерированы, но все отфильтрованы.")
 
-    if not answers:
-        print("⚠️ Не найдено релевантных ответов. Попробуйте переформулировать запрос.")
-        continue
+        if not answers:
+            print("⚠️ Не найдено релевантных ответов. Попробуйте переформулировать запрос.")
+            continue
 
-    print("\n📌 Лучшие ответы:")
-    for i, (ctx, ans, score) in enumerate(results, 1):
-        print(f"{i}) {ans}\n   🔹 Релевантность: {score:.4f}\n")
+        print("\n📌 Лучшие ответы:")
+        for i, (ctx, ans, score) in enumerate(results, 1):
+            print(f"{i}) {ans}\n   🔹 Релевантность: {score:.4f}\n")
