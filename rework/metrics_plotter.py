@@ -25,6 +25,7 @@ PERCENT_METRICS = {
     "fuzzy",
     "len_ratio",
     "bertscore_f1",
+    "semantic_similarity",
 }
 
 

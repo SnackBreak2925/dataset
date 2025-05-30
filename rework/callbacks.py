@@ -5,6 +5,7 @@ from nltk.translate.bleu_score import sentence_bleu, SmoothingFunction
 from rouge_score import rouge_scorer
 from tqdm import tqdm
 from bert_score import score as bertscore_score
+from sentence_transformers import SentenceTransformer, util
 
 import nltk
 
@@ -66,6 +67,7 @@ class AccuracyCallback(TrainerCallback):
         self.meteor_score = meteor_score
         self.chrf_metric = CHRF()
         self.Levenshtein = Levenshtein
+        self.sim_model = SentenceTransformer("paraphrase-multilingual-MiniLM-L12-v2")
 
     @staticmethod
     def masked_accuracy(logits, labels):
@@ -97,6 +99,7 @@ class AccuracyCallback(TrainerCallback):
             lenratio_list,
         ) = [], [], [], [], [], [], []
         masked_accs = []
+        semantic_similarities = []
 
         all_preds_for_bertscore = []
         all_refs_for_bertscore = []
@@ -178,6 +181,18 @@ class AccuracyCallback(TrainerCallback):
             tqdm.write(f"BERTScore failed: {e}")
             bertscore_f1 = 0.0
 
+        for pred, ref in zip(all_preds_for_bertscore, all_refs_for_bertscore):
+            emb_pred = self.sim_model.encode(pred, convert_to_tensor=True)
+            emb_ref = self.sim_model.encode(ref, convert_to_tensor=True)
+            sim = float(util.pytorch_cos_sim(emb_pred, emb_ref))
+            semantic_similarities.append(sim)
+
+        avg_semantic_similarity = (
+            sum(semantic_similarities) / len(semantic_similarities)
+            if semantic_similarities
+            else 0.0
+        )
+
         tqdm.write(f"✅ Accuracy @ step {state.global_step}: {acc:.4f}")
         tqdm.write(f"📊 ROUGE-1: {rouge1:.4f}, ROUGE-L: {rougeL:.4f}, BLEU: {bleu:.4f}")
         tqdm.write(
@@ -185,6 +200,7 @@ class AccuracyCallback(TrainerCallback):
         )
         tqdm.write(f"🟢 Masked accuracy: {masked_acc:.4f}")
         tqdm.write(f"🧠 BERTScore(F1) (all beams): {bertscore_f1:.4f}")
+        tqdm.write(f"🟡 Semantic similarity (MiniLM): {avg_semantic_similarity:.4f}")
         tqdm.write(f"Эпоха {state.epoch} завершена!")
 
         # Сохраняем все метрики в csv
@@ -201,6 +217,7 @@ class AccuracyCallback(TrainerCallback):
             "fuzzy": fuzzy,
             "len_ratio": len_ratio,
             "bertscore_f1": bertscore_f1,
+            "semantic_similarity": avg_semantic_similarity
         }
         last_train_log = next(
             (log for log in reversed(state.log_history) if "loss" in log), {}

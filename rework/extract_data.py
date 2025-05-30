@@ -4,8 +4,12 @@ import dotenv
 import re
 import pandas as pd
 from sqlalchemy import create_engine, text
-from collections import defaultdict
+from collections import defaultdict, Counter
 import html
+import torch
+from sentence_transformers import SentenceTransformer
+from tqdm import tqdm
+from sklearn.cluster import AgglomerativeClustering
 
 EMAIL_REGEX = r'(([^<>()\[\]\\.,;:\s@"]+(\.[^<>()\[\]\\.,;:\s@"]+)*)|(".+"))@((\[[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}])|(([a-zA-Z\-0-9]+\.)+[a-zA-Z]{2,}))'
 URL_REGEX = r"https?:\/\/(www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b([-a-zA-Z0-9()!@:%_\+.~#?&\/\/=]*)"
@@ -151,9 +155,9 @@ def remove_signature_from_message(row):
     message = row["reply_message"]
     staffid = row["staffid"]
     if staffid != 0:
-        signature = staff_signatures.get(staffid)
-        if signature and signature.strip():
-            message = message.replace(signature, "")
+        for sig in staff_signatures.get(staffid, []):
+            if sig and sig.strip() and sig in message:
+                message = message.replace(sig, "")
     return message
 
 
@@ -162,11 +166,33 @@ def build_dialogue(messages, upto_idx):
         return ""
     return "\n".join(f"{m['role']}: {m['message']}" for m in messages[:upto_idx])
 
+
 def normalize_label(text):
     text = text.strip()
     text = text.replace(". [URL]", " [URL]")
     text = re.sub(r"\s+", " ", text)
     return text
+
+
+def sentence_normalize(text):
+    sentence_end = re.compile(r"([.!?…]+)(\s+|$)")
+    parts = []
+    last = 0
+    for m in sentence_end.finditer(text):
+        start, end = m.span()
+        sentence = text[last:end].strip()
+        if sentence:
+            sentence = sentence[0].upper() + sentence[1:]
+            parts.append(sentence)
+        last = end
+    if last < len(text):
+        sentence = text[last:].strip()
+        if sentence:
+            sentence = sentence[0].upper() + sentence[1:]
+            if not re.search(r"[.!?…]$", sentence):
+                sentence += "."
+            parts.append(sentence)
+    return " ".join(parts)
 
 
 if __name__ == "__main__":
@@ -177,21 +203,29 @@ if __name__ == "__main__":
         replies_df = pd.read_sql(repiles_query(), conn)
         signatures_df = pd.read_sql("SELECT id, signature FROM hesk_users", conn)
 
-    # убрать пустые
     filtered_signatures_df = signatures_df[signatures_df["signature"].astype(bool)]
     filtered_signatures_df.loc[:, "signature"] = filtered_signatures_df[
         "signature"
     ].apply(clean_text)
-    staff_signatures = dict(
-        zip(filtered_signatures_df["id"], filtered_signatures_df["signature"])
-    )
 
+    staff_signatures = defaultdict(set)
+    staff_signatures: dict[int, set[str]] = defaultdict(set)
+
+    # Автоматически извлечённые
+    for sid, sig in zip(
+        filtered_signatures_df["id"], filtered_signatures_df["signature"]
+    ):
+        if sig:
+            staff_signatures[sid].add(sig)
+
+    # Ручные подписи
     manual_signatures = {
         21: "С уважением, начальник отдела сопровождения и поддержки Попков Александр Юрьевич",
         26: "Юлия Митузина Отдел сопровождения и поддержки Центра разработки и внедрения Тел.: (3822) 900-157, внутр. 1130",
+        33: "Начальник ЦИТС ТУСУР. г. Томск, ул. Красноармейская, 146, каб. 804 Тел. (3822) 701-515 (внутр. 2436)",
     }
-
-    staff_signatures.update(manual_signatures)
+    for sid, sig in manual_signatures.items():
+        staff_signatures[sid].add(sig)
 
     replies_df = replies_df.fillna("")
 
@@ -220,12 +254,55 @@ if __name__ == "__main__":
             ticket_subjects[row.ticket_id] = row.subject
 
     unwanted_labels = {
-        "Здравствуйте! [URL]",
-        "Здравствуйте! [URL] [URL]",
-        "Добрый день! [URL]",
-        "Добрый день! [URL] [URL]",
-        "[URL]",
-        "[URL] [URL]",
+        "Здравствуйте! [URL] [URL].",
+        "[URL].",
+        "[URL] [URL].",
+        "Здравствуйте! Исправили.",
+        "Здравствуйте! Поправил.",
+        "Здравствуйте! Заменил.",
+        "Добрый день! Ошибку исправили.",
+        "Поправил.",
+        "Готово!",
+        "Доброе утро! [URL].",
+        "Здравствуйте! Готово [URL].",
+        "Готово [URL].",
+        "Добрый день! Готово.",
+        "Добрый день! [URL].",
+        "Готово.",
+        "Здравствуйте! [URL].",
+        "Здравствуйте! Готово.",
+        "Добрый день! Готово: [URL].",
+        "Доброе утро! Готово.",
+        "Готово).",
+        "Здравствуйте! Добавили.",
+        "Здравствуйте! Убрал.",
+        "Добавил.",
+        "Заменил.",
+        "Готово: [URL].",
+        "Проблема исправлена.",
+        "Здравствуйте! Ошибку исправили.",
+        "Исправлено.",
+        "Добрый день! Готово [URL].",
+        "Все готово.",
+        "Здравствуйте, готово [URL].",
+        "Добрый день, готово.",
+        "Здравствуйте, готово.",
+        "Здравствуйте! Добавил.",
+        "Здравствуйте! Поправили.",
+        "Исправили.",
+        "Ошибку исправили.",
+        "Здравствуйте! Исправлено.",
+        "Здравствуйте! Заменили.",
+        "Удалил.",
+        "Здравствуйте! Готово - [URL].",
+        "Добрый день [URL].",
+        "Здравствуйте! Разместил.",
+        "Здравствуйте! Готов [URL].",
+        "Здравствуйте! Все готово.",
+        "Здравствуйте! Права добавили.",
+        "Решена.",
+        "Доброе утро! Заменил.",
+        "Здравствуйте! Удалил.",
     }
 
     dataset = []
@@ -234,6 +311,7 @@ if __name__ == "__main__":
 
         last_operator_msg = messages[idx]
         label = normalize_label(last_operator_msg["message"].strip())
+        label = sentence_normalize(label)
         if label.strip() in unwanted_labels:
             continue
         dialogue = build_dialogue(messages, idx)
@@ -259,7 +337,58 @@ if __name__ == "__main__":
             }
         )
 
+    # print("🔄 Получаем эмбеддинги через RuBERT для кластеризации...")
+
+    # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    # model = SentenceTransformer("paraphrase-multilingual-MiniLM-L12-v2")
+
+    # unique_labels = list({entry["label"] for entry in dataset})
+
+    # def embed_batch(batch):
+    #     return model.encode(batch, batch_size=32, show_progress_bar=False)
+
+    # batch_size = 32
+    # embeddings = []
+
+    # for i in tqdm(range(0, len(unique_labels), batch_size), desc="Векторизация"):
+    #     batch = unique_labels[i : i + batch_size]
+    #     embeddings.extend(embed_batch(batch))
+
+    # threshold = 0.92
+    # clustering = AgglomerativeClustering(
+    #     n_clusters=None,
+    #     distance_threshold=1 - threshold,
+    #     metric="cosine",
+    #     linkage="average",
+    # )
+    # labels = clustering.fit_predict(embeddings)
+
+    # label_map = {}
+    # for cluster_id in set(labels):
+    #     indices = [i for i, lbl in enumerate(labels) if lbl == cluster_id]
+    #     canonical = unique_labels[indices[0]]
+    #     for i in indices:
+    #         label_map[unique_labels[i]] = canonical
+
+    # for entry in dataset:
+    #     entry["label"] = label_map.get(entry["label"], entry["label"])
+
     with open("dialogue_dataset.json", "w", encoding="utf-8") as f:
         json.dump(dataset, f, ensure_ascii=False, indent=2)
 
-    print(f"✅ Сохранено {len(dataset)} диалогов в dialogue_dataset.json")
+    # with open("label_map.json", "w", encoding="utf-8") as f:
+    #     json.dump(label_map, f, ensure_ascii=False, indent=2)
+
+    print(f"✅ Сохранено {len(dataset)} диалогов")
+    # print("✅ Группировка схожих ответов завершена и сохранена в dialogue_dataset.json")
+
+    # Подсчёт количества повторений label
+    label_counter = Counter(entry["label"] for entry in dataset)
+    sorted_label_counts = sorted(
+        label_counter.items(), key=lambda x: x[1], reverse=True
+    )
+
+    print("\n🔢 Топ повторяющихся ответов (label):")
+    for label, count in sorted_label_counts[:20]:
+        print(f"{count:4} × {label}")
