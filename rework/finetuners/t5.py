@@ -11,9 +11,10 @@ from transformers import (
 )
 from datasets import Dataset
 
-from metrics_plotter import MetricsPlotter
-from callbacks import AccuracyCallback, LogCallback
-from dual_logger import DualLogger
+from helpers.dual_logger import DualLogger
+from helpers.metrics_plotter import MetricsPlotter
+from callbacks.log import LogCallback
+from callbacks.accuracy import AccuracyCallback
 
 
 class T5FineTuner:
@@ -43,6 +44,7 @@ class T5FineTuner:
 
         self.init_timestamp = int(time.time())
         import sys
+
         sys.stdout = DualLogger(self.model_short_name(), self.init_timestamp)
 
     def model_short_name(self):
@@ -101,7 +103,6 @@ class T5FineTuner:
         train_dataset = Dataset.from_list(train_data)
         test_dataset = Dataset.from_list(test_data)
 
-        # Загрузка модели и токенизатора
         self.model = T5ForConditionalGeneration.from_pretrained(self.model_name)
         self.tokenizer = T5Tokenizer.from_pretrained(
             self.model_name, **self.tokenizer_kwargs
@@ -145,7 +146,6 @@ class T5FineTuner:
             tokenizer=self.tokenizer, model=self.model
         )
 
-        # Trainer
         trainer = Seq2SeqTrainer(
             model=self.model,
             args=training_args,
@@ -158,12 +158,12 @@ class T5FineTuner:
                     self.tokenizer,
                     self.init_timestamp,
                     self.model_short_name(),
+                    raw_test_data=test_data,
                 ),
             ],
             **self.kwargs,
         )
 
-        # baseline evaluation before training
         print("==> Evaluate BEFORE training (zero epoch baseline)...")
         trainer.evaluate()
 
@@ -173,7 +173,6 @@ class T5FineTuner:
         self.tokenizer.save_pretrained(self.output_dir)
         print("\n✅ Обучение завершено и модель сохранена")
 
-        # Построение графиков
         plotter = MetricsPlotter(logs_dir="logs", base_out_dir="train_results")
         plotter.plot_metrics(
             model_name=self.model_short_name(), init_timestamp=self.init_timestamp

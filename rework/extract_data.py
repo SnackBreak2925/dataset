@@ -6,10 +6,6 @@ import pandas as pd
 from sqlalchemy import create_engine, text
 from collections import defaultdict, Counter
 import html
-import torch
-from sentence_transformers import SentenceTransformer
-from tqdm import tqdm
-from sklearn.cluster import AgglomerativeClustering
 
 EMAIL_REGEX = r'(([^<>()\[\]\\.,;:\s@"]+(\.[^<>()\[\]\\.,;:\s@"]+)*)|(".+"))@((\[[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}])|(([a-zA-Z\-0-9]+\.)+[a-zA-Z]{2,}))'
 URL_REGEX = r"https?:\/\/(www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b([-a-zA-Z0-9()!@:%_\+.~#?&\/\/=]*)"
@@ -337,53 +333,12 @@ if __name__ == "__main__":
             }
         )
 
-    # print("🔄 Получаем эмбеддинги через RuBERT для кластеризации...")
-
-    # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-    # model = SentenceTransformer("paraphrase-multilingual-MiniLM-L12-v2")
-
-    # unique_labels = list({entry["label"] for entry in dataset})
-
-    # def embed_batch(batch):
-    #     return model.encode(batch, batch_size=32, show_progress_bar=False)
-
-    # batch_size = 32
-    # embeddings = []
-
-    # for i in tqdm(range(0, len(unique_labels), batch_size), desc="Векторизация"):
-    #     batch = unique_labels[i : i + batch_size]
-    #     embeddings.extend(embed_batch(batch))
-
-    # threshold = 0.92
-    # clustering = AgglomerativeClustering(
-    #     n_clusters=None,
-    #     distance_threshold=1 - threshold,
-    #     metric="cosine",
-    #     linkage="average",
-    # )
-    # labels = clustering.fit_predict(embeddings)
-
-    # label_map = {}
-    # for cluster_id in set(labels):
-    #     indices = [i for i, lbl in enumerate(labels) if lbl == cluster_id]
-    #     canonical = unique_labels[indices[0]]
-    #     for i in indices:
-    #         label_map[unique_labels[i]] = canonical
-
-    # for entry in dataset:
-    #     entry["label"] = label_map.get(entry["label"], entry["label"])
-
     with open("dialogue_dataset.json", "w", encoding="utf-8") as f:
         json.dump(dataset, f, ensure_ascii=False, indent=2)
 
-    # with open("label_map.json", "w", encoding="utf-8") as f:
-    #     json.dump(label_map, f, ensure_ascii=False, indent=2)
 
     print(f"✅ Сохранено {len(dataset)} диалогов")
-    # print("✅ Группировка схожих ответов завершена и сохранена в dialogue_dataset.json")
 
-    # Подсчёт количества повторений label
     label_counter = Counter(entry["label"] for entry in dataset)
     sorted_label_counts = sorted(
         label_counter.items(), key=lambda x: x[1], reverse=True

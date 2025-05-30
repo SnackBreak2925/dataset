@@ -48,11 +48,13 @@ for fn in os.listdir(KB_DIR):
         unique_entries = sorted(set(e.strip() for e in entries if e.strip()))
         category_kbs[cat] = unique_entries
         category_embeddings[cat] = retriever.encode(
-            unique_entries, convert_to_tensor=True
+            unique_entries, convert_to_tensor=True, show_progress_bar=False
         )
         category_names.append(cat)
 
-category_name_embeddings = retriever.encode(category_names, convert_to_tensor=True)
+category_name_embeddings = retriever.encode(
+    category_names, convert_to_tensor=True, show_progress_bar=False
+)
 print(f"📚 Загружено категорий: {len(category_kbs)}\n")
 
 

@@ -1,12 +1,14 @@
-from t5_fine_tuner import T5FineTuner
+from finetuners.t5 import T5FineTuner
 
 if __name__ == "__main__":
     finetuner = T5FineTuner(
         model_name="cointegrated/rut5-base",
         dataset_path="dialogue_dataset.json",
         output_dir="./rut5base-finetuned",
+        freeze_encoder_layers=2,
+        freeze_decoder_layers=4,
         trainer_args={
-            "num_train_epochs": 15,
+            "num_train_epochs": 25,
             "learning_rate": 4e-5,
         },
     )
