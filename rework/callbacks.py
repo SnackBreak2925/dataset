@@ -227,13 +227,13 @@ class AccuracyCallback(TrainerCallback):
 
         metrics_row.update(
             {
-                "train_loss": last_train_log.get("loss"),
-                "grad_norm": last_train_log.get("grad_norm"),
-                "learning_rate": last_train_log.get("learning_rate"),
-                "eval_loss": last_eval_log.get("eval_loss"),
-                "eval_runtime": last_eval_log.get("eval_runtime"),
-                "eval_samples_per_second": last_eval_log.get("eval_samples_per_second"),
-                "eval_steps_per_second": last_eval_log.get("eval_steps_per_second"),
+                "train_loss": last_train_log.get("loss", 0.0),
+                "grad_norm": last_train_log.get("grad_norm", 0.0),
+                "learning_rate": last_train_log.get("learning_rate", 0.0),
+                "eval_loss": last_eval_log.get("eval_loss", 0.0),
+                "eval_runtime": last_eval_log.get("eval_runtime", 0.0),
+                "eval_samples_per_second": last_eval_log.get("eval_samples_per_second", 0.0),
+                "eval_steps_per_second": last_eval_log.get("eval_steps_per_second", 0.0),
             }
         )
 
