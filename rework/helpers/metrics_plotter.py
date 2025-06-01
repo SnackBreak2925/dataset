@@ -26,6 +26,16 @@ PERCENT_METRICS = {
     "len_ratio",
     "bertscore_f1",
     "semantic_similarity",
+    "rag_rouge1",
+    "rag_rougeL",
+    "rag_bleu",
+    "rag_masked_accuracy",
+    "rag_meteor",
+    "rag_chrf",
+    "rag_fuzzy",
+    "rag_len_ratio",
+    "rag_bertscore_f1",
+    "rag_semantic_similarity",
 }
 
 

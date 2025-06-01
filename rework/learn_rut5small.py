@@ -8,8 +8,8 @@ if __name__ == "__main__":
         freeze_encoder_layers=2,
         freeze_decoder_layers=6,
         trainer_args={
-            "num_train_epochs": 50,
-            "learning_rate": 7e-5,
+            "num_train_epochs": 100,
+            "learning_rate": 5e-5,
         },
     )
     finetuner.run()

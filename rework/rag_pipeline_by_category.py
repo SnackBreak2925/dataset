@@ -115,7 +115,7 @@ def generate_with_contexts(category, question, top_k=5):
             continue
         idx = hit["corpus_id"]
         ctx = kb[idx]
-        prompt = f"Категория: {category}\nКонтекст: {ctx}\nВопрос: {question}"
+        prompt = f"Категория: {category}\nКонтекст: {ctx}\nВопрос: {question}\nОператор: "
         logger.info("Prompt used:\n%s\n", prompt)
         try:
             ids = tokenizer.encode(
