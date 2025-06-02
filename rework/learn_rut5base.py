@@ -8,7 +8,7 @@ if __name__ == "__main__":
         freeze_encoder_layers=2,
         freeze_decoder_layers=4,
         trainer_args={
-            "num_train_epochs": 50,
+            "num_train_epochs": 20,
             "learning_rate": 4e-5,
         },
     )
