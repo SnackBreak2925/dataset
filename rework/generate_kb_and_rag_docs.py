@@ -40,7 +40,7 @@ def generate_kb_and_rag_docs(
             "question_text": question,
             "expected_answer": context,
             "rag_prompt": f"Категория: {category}\nКонтекст: {context}\nВопрос: {question}",
-            "status": "pending",  # можно менять на 'processed', 'validated', 'skipped' и т.д.
+            "status": "pending",
             "notes": "",
         }
 

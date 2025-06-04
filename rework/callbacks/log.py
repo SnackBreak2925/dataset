@@ -1,7 +1,6 @@
 from transformers import TrainerCallback
 from tqdm import tqdm
-from helpers.rag_runnable import get_rag_beams
-
+from helpers.rag_pipeline import RagPipeline
 import nltk
 
 try:
@@ -18,6 +17,8 @@ class LogCallback(TrainerCallback):
     def on_evaluate(self, args, state, control, **kwargs):
         model = kwargs["model"]
         model.eval()
+        self.rag_pipe = RagPipeline(model=kwargs["model"], tokenizer=self.tokenizer)
+        self.rag_pipe.refresh_checkpoint()
 
         for ex in self.examples:
             prompt = (
@@ -47,11 +48,16 @@ class LogCallback(TrainerCallback):
 
             tqdm.write("*" * 100)
 
-            rag_beams = get_rag_beams(
-                ex["ticket_message"]
-            )
+            question = ex["ticket_message"]
+            category = self.rag_pipe.auto_detect_category(question)
+            if not category:
+                rag_beams = ["[Категория не определена]"] * 5
+            else:
+                rag_beams, _ = self.rag_pipe.generate_with_contexts(
+                    category, question, top_k=5
+                )
             tqdm.write("[Первоначальное сообщение]:")
-            tqdm.write(ex["ticket_message"])
+            tqdm.write(question)
             for idx, rag in enumerate(rag_beams, 1):
                 tqdm.write(f"[RAG Beam {idx}]: {rag}")
 

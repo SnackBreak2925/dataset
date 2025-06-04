@@ -175,6 +175,20 @@ files = [
 frozenlist = ">=1.1.0"
 
 [[package]]
+name = "amazing-printer"
+version = "0.1.0"
+description = "A python package that pretty prints Python objects with colors and proper indentation."
+optional = false
+python-versions = "*"
+groups = ["main"]
+files = [
+    {file = "amazing_printer-0.1.0-py3-none-any.whl", hash = "sha256:98605430f330b4247e2a3357ebf7bcdd73433c56d8e61d117b8ed71a9718e052"},
+]
+
+[package.dependencies]
+colorama = ">=0.4.0"
+
+[[package]]
 name = "attrs"
 version = "25.3.0"
 description = "Classes Without Boilerplate"
@@ -3680,4 +3694,4 @@ propcache = ">=0.2.1"
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<4.0"
-content-hash = "9fed30afa22a3149b0b3129c913ab3a208ceefb5387fc750b1e77613459cc836"
+content-hash = "72f5979903ddb2049a4e05dc5b361be9c824a07f2999b41fce2b984e4e2dc6b5"

@@ -111,7 +111,9 @@ class AccuracyCallback(TrainerCallback):
         self.meteor_score = meteor_score
         self.chrf_metric = CHRF()
         self.Levenshtein = Levenshtein
-        self.sim_model = SentenceTransformer("paraphrase-multilingual-MiniLM-L12-v2")
+        self.sim_model = SentenceTransformer(
+            "paraphrase-multilingual-MiniLM-L12-v2", device="cpu"
+        )
         self.metrics_logfile = (
             f"logs/metrics-log-{self.model_name}-{self.init_timestamp}.csv"
         )
@@ -120,7 +122,9 @@ class AccuracyCallback(TrainerCallback):
         model = kwargs["model"]
         eval_dataloader = kwargs["eval_dataloader"]
         model.eval()
-        self.rag_pipe = RagPipeline(output_dir=args.output_dir)
+        self.rag_pipe = RagPipeline(
+            model=kwargs["model"], tokenizer=self.tokenizer, sim_model=self.sim_model
+        )
 
         all_preds_for_bertscore, all_refs_for_bertscore = [], []
         preds, labels = [], []
@@ -199,27 +203,87 @@ class AccuracyCallback(TrainerCallback):
         avg_semantic_similarity = aggregate_metric(semantic_similarities)
 
         tqdm.write("compute_rag...")
-        BATCH_SIZE = 16
+
+        BATCH_SIZE = 8
         TOP_K = 5
         rag_beams = []
         rag_refs = []
+
         with tqdm(total=total, desc="Валидация (RAG)") as val_bar:
             for batch_start in range(0, len(decoded_labels_total), BATCH_SIZE):
-                batch_examples = self.raw_test_data[batch_start:batch_start+BATCH_SIZE]
-                batch_labels = decoded_labels_total[batch_start:batch_start+BATCH_SIZE]
-                for ex, ref in zip(batch_examples, batch_labels):
-                    question = ex["ticket_message"]
-                    category = self.rag_pipe.auto_detect_category(question)
-                    if not category:
-                        answers = ["[Категория не определена]"] * TOP_K
-                    else:
-                        answers, _ = self.rag_pipe.generate_with_contexts(category, question, top_k=TOP_K)
-                        # pad до TOP_K если ответов меньше
-                        if len(answers) < TOP_K:
-                            answers += ["[Нет ответа]"] * (TOP_K - len(answers))
-                    rag_beams.append(answers)
+                batch_examples = self.raw_test_data[
+                    batch_start : batch_start + BATCH_SIZE
+                ]
+                batch_labels = decoded_labels_total[
+                    batch_start : batch_start + BATCH_SIZE
+                ]
+
+                # 1. Получаем все вопросы батчем
+                questions = [ex["ticket_message"] for ex in batch_examples]
+                # 2. Получаем категории батчем (можно доработать, если категорий немного — сейчас пусть будет одна)
+                # Если у всех batch_examples одна категория:
+                category = self.rag_pipe.auto_detect_category(questions[0])
+                if not category:
+                    # если не определено — просто заполни всю batch
+                    for ref in batch_labels:
+                        rag_beams.append(["[Категория не определена]"] * TOP_K)
+                        rag_refs.append([ref] * TOP_K)
+                    val_bar.update(len(batch_examples))
+                    continue
+
+                # 3. Батчевый поиск топ-контекстов для всех вопросов
+                all_hits = self.rag_pipe.batch_retrieve_contexts(
+                    category, questions, top_k=TOP_K
+                )
+
+                # 4. Формируем все prompt-ы для генерации сразу для всего батча
+                prompts = []
+                prompt_map = []  # (question_idx, ref, ctx, score)
+                adaptive_threshold = 0.1  # Можно сделать динамическим, если хочется
+
+                for q_idx, (hits, ref) in enumerate(zip(all_hits, batch_labels)):
+                    cnt = 0
+                    for hit in hits:
+                        if hit["score"] < adaptive_threshold:
+                            continue
+                        idx = hit["corpus_id"]
+                        ctx = self.rag_pipe.category_kbs[category][idx]
+                        prompt = (
+                            f"Категория: {category}\n"
+                            f"Контекст: {ctx}\n"
+                            f"Вопрос: {questions[q_idx]}\n"
+                            "Оператор: "
+                        )
+                        prompts.append(prompt)
+                        prompt_map.append((q_idx, ref, ctx, hit["score"]))
+                        cnt += 1
+                    # если не найдено ничего — fallback
+                    if cnt == 0:
+                        rag_beams.append(["[Нет релевантных контекстов]"] * TOP_K)
+                        rag_refs.append([ref] * TOP_K)
+                if not prompts:
+                    val_bar.update(len(batch_examples))
+                    continue
+
+                # 5. Батчевый inference!
+                answers = self.rag_pipe.batched_generate_answers(
+                    prompts, batch_size=BATCH_SIZE
+                )
+
+                # 6. Собираем ответы по каждому вопросу batch
+                from collections import defaultdict
+
+                responses_by_question = defaultdict(list)
+                for (q_idx, ref, ctx, score), ans in zip(prompt_map, answers):
+                    responses_by_question[q_idx].append(ans)
+                # Если меньше TOP_K — паддинг
+                for q_idx, ref in enumerate(batch_labels):
+                    beams = responses_by_question.get(q_idx, [])
+                    if len(beams) < TOP_K:
+                        beams += ["[Нет ответа]"] * (TOP_K - len(beams))
+                    rag_beams.append(beams)
                     rag_refs.append([ref] * TOP_K)
-                    val_bar.update(1)
+                val_bar.update(len(batch_examples))
 
         flat_rag_beams = [ans for answers in rag_beams for ans in answers]
         flat_rag_refs = [ref for refs in rag_refs for ref in refs]
@@ -237,7 +301,6 @@ class AccuracyCallback(TrainerCallback):
             flat_rag_beams, flat_rag_refs, self.sim_model
         )
         rag_bertscore_f1 = compute_bertscore(flat_rag_beams, flat_rag_refs)
-
 
         metrics_row = {
             "step": state.global_step,
