@@ -6,7 +6,7 @@ from rouge_score import rouge_scorer
 from tqdm import tqdm
 from bert_score import score as bertscore_score
 from sentence_transformers import SentenceTransformer, util
-from helpers.rag_runnable import get_rag_answer
+from helpers.rag_pipeline import RagPipeline
 import nltk
 from nltk.translate.meteor_score import meteor_score
 from sacrebleu.metrics import CHRF
@@ -120,6 +120,7 @@ class AccuracyCallback(TrainerCallback):
         model = kwargs["model"]
         eval_dataloader = kwargs["eval_dataloader"]
         model.eval()
+        self.rag_pipe = RagPipeline(output_dir=args.output_dir)
 
         all_preds_for_bertscore, all_refs_for_bertscore = [], []
         preds, labels = [], []
@@ -166,8 +167,6 @@ class AccuracyCallback(TrainerCallback):
                 for i in range(batch_size):
                     ref = decoded_labels[i]
                     beams = decoded_preds[i * num_beams : (i + 1) * num_beams]
-                    raw_example = self.raw_test_data[running_idx]
-                    ticket_message = raw_example["ticket_message"]
                     for pred in beams:
                         all_preds_for_bertscore.append(pred)
                         all_refs_for_bertscore.append(ref)
@@ -200,24 +199,34 @@ class AccuracyCallback(TrainerCallback):
         avg_semantic_similarity = aggregate_metric(semantic_similarities)
 
         tqdm.write("compute_rag...")
-        rag_preds, rag_refs = [], []
+        BATCH_SIZE = 16
+        TOP_K = 5
+        rag_beams = []
+        rag_refs = []
         with tqdm(total=total, desc="Валидация (RAG)") as val_bar:
-            for i in range(len(decoded_labels_total)):
-                raw_example = self.raw_test_data[i]
-                ticket_message = raw_example["ticket_message"]
-                ref = decoded_labels_total[i]
-                try:
-                    rag_pred = get_rag_answer(ticket_message)
-                except Exception as e:
-                    tlog(f"[ERROR] RAG failed for sample {i}: {e}")
-                    rag_pred = "[RAG_ERROR]"
-                rag_preds.append(rag_pred)
-                rag_refs.append(ref)
-                val_bar.update(1)
+            for batch_start in range(0, len(decoded_labels_total), BATCH_SIZE):
+                batch_examples = self.raw_test_data[batch_start:batch_start+BATCH_SIZE]
+                batch_labels = decoded_labels_total[batch_start:batch_start+BATCH_SIZE]
+                for ex, ref in zip(batch_examples, batch_labels):
+                    question = ex["ticket_message"]
+                    category = self.rag_pipe.auto_detect_category(question)
+                    if not category:
+                        answers = ["[Категория не определена]"] * TOP_K
+                    else:
+                        answers, _ = self.rag_pipe.generate_with_contexts(category, question, top_k=TOP_K)
+                        # pad до TOP_K если ответов меньше
+                        if len(answers) < TOP_K:
+                            answers += ["[Нет ответа]"] * (TOP_K - len(answers))
+                    rag_beams.append(answers)
+                    rag_refs.append([ref] * TOP_K)
+                    val_bar.update(1)
+
+        flat_rag_beams = [ans for answers in rag_beams for ans in answers]
+        flat_rag_refs = [ref for refs in rag_refs for ref in refs]
 
         rag_metrics = compute_seq2seq_metrics(
-            rag_preds,
-            rag_refs,
+            flat_rag_beams,
+            flat_rag_refs,
             rouge=self.rouge,
             meteor_score=self.meteor_score,
             chrf_metric=self.chrf_metric,
@@ -225,9 +234,10 @@ class AccuracyCallback(TrainerCallback):
             smooth=self.smooth,
         )
         rag_semantic_list = compute_semantic_similarity(
-            rag_preds, rag_refs, self.sim_model
+            flat_rag_beams, flat_rag_refs, self.sim_model
         )
-        rag_bertscore_f1 = compute_bertscore(rag_preds, rag_refs)
+        rag_bertscore_f1 = compute_bertscore(flat_rag_beams, flat_rag_refs)
+
 
         metrics_row = {
             "step": state.global_step,

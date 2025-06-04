@@ -5,7 +5,7 @@ def get_rag_answer(ticket_message):
     category = auto_detect_category(ticket_message)
     if not category:
         return "[Категория не определена]"
-    answers, results = generate_with_contexts(category, ticket_message, top_k=1)
+    answers, _ = generate_with_contexts(category, ticket_message, top_k=1)
     return answers[0] if answers else "[Нет ответа]"
 
 def get_rag_beams(ticket_message, top_k=5):

@@ -23,7 +23,6 @@ PERCENT_METRICS = {
     "meteor",
     "chrf",
     "fuzzy",
-    "len_ratio",
     "bertscore_f1",
     "semantic_similarity",
     "rag_rouge1",
@@ -111,16 +110,21 @@ class MetricsPlotter:
                 continue
             plt.figure(figsize=(8, 5))
             x = list(df[x_axis])
+            x = list(map(lambda val: int(val), x))
             y = list(df[metric])
-            plt.plot(x, y, marker="o", label=metric)
+            if metric in PERCENT_METRICS:
+                y = list(map(lambda x: x * 100, y))
+            plt.plot(x, y, label=metric)
             plt.title(metric)
             plt.xlabel(x_axis.capitalize())
             plt.ylabel(metric)
             plt.grid(True)
             plt.legend()
             plt.xlim(left=0, right=max(x))
+            plt.xticks(range(0, max(x) + 1, max(x) // 20))
             if metric in PERCENT_METRICS:
-                plt.ylim(bottom=0, top=1.0)
+                plt.ylim(bottom=0, top=100)
+                plt.yticks(range(0, 101, 10))
             else:
                 y_max = max([v for v in y if pd.notnull(v)])
                 plt.ylim(bottom=0, top=self.nice_ceil(y_max))
