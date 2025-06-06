@@ -1,6 +1,10 @@
 import re
 import html
 
+def postprocess_answer(answer):
+    if "Оператор:" in answer:
+        return answer.split("Оператор: ")[-1].strip()
+    return answer.strip()
 
 class TextCleaner:
     EMAIL_REGEX = re.compile(

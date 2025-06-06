@@ -2,6 +2,7 @@ from transformers import TrainerCallback
 from tqdm import tqdm
 from helpers.rag_pipeline import RagPipeline
 import nltk
+from helpers.cleaner import postprocess_answer
 
 try:
     nltk.data.find("corpora/wordnet")
@@ -30,13 +31,20 @@ class LogCallback(TrainerCallback):
             input_ids = self.tokenizer.encode(
                 prompt, return_tensors="pt", max_length=256, truncation=True
             ).to(model.device)
-            outputs = model.generate(
-                input_ids,
-                max_length=64,
-                num_beams=5,
-                num_return_sequences=5,
-                early_stopping=True,
-            )
+            try:
+                outputs = model.generate(
+                    input_ids,
+                    max_length=64,
+                    num_beams=5,
+                    num_return_sequences=5,
+                )
+            except Exception:
+                outputs = model.generate(
+                    input_ids,
+                    max_new_tokens=128,
+                    num_beams=5,
+                    num_return_sequences=5,
+                )
             tqdm.write("=" * 100)
 
             tqdm.write(f"[Входной текст]: {ex['text']}")
@@ -44,7 +52,7 @@ class LogCallback(TrainerCallback):
             tqdm.write(f"[Эталонный ответ]: {ex.get('label', 'нет')}")
             for idx, output in enumerate(outputs, 1):
                 answer = self.tokenizer.decode(output, skip_special_tokens=True)
-                tqdm.write(f"[Beam {idx}]: {answer}")
+                tqdm.write(f"[Beam {idx}]: {postprocess_answer(answer)}")
 
             tqdm.write("*" * 100)
 

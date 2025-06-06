@@ -6,6 +6,8 @@ import torch
 from transformers import T5Tokenizer, T5ForConditionalGeneration
 from sentence_transformers import SentenceTransformer, util
 
+from helpers.cleaner import postprocess_answer
+
 
 class RagPipeline:
     def __init__(
@@ -133,8 +135,7 @@ class RagPipeline:
                 return True
         return False
 
-    def batched_generate_answers(self, prompts, batch_size=16, max_length=64):
-        """Генерирует ответы по списку prompts батчами."""
+    def batched_generate_answers(self, prompts, batch_size=16, max_length=128):
         all_answers = []
         for i in range(0, len(prompts), batch_size):
             batch_prompts = prompts[i : i + batch_size]
@@ -146,20 +147,31 @@ class RagPipeline:
                 max_length=256,
             ).input_ids.to(self.device)
             with torch.no_grad():
-                outputs = self.model.generate(
-                    input_ids,
-                    max_length=max_length,
-                    do_sample=True,
-                    top_k=50,
-                    top_p=0.95,
-                    num_return_sequences=1,
-                )
+                try:
+                    outputs = self.model.generate(
+                        input_ids,
+                        max_length=max_length,
+                        do_sample=True,
+                        top_k=50,
+                        top_p=0.95,
+                        num_return_sequences=1,
+                    )
+                except Exception:
+                    outputs = self.model.generate(
+                        input_ids,
+                        max_new_tokens=128,
+                        do_sample=True,
+                        top_k=50,
+                        top_p=0.95,
+                        num_return_sequences=1,
+                    )
             decoded = self.tokenizer.batch_decode(outputs, skip_special_tokens=True)
+            # processed_answers = [postprocess_answer(ans) for ans in decoded]
+            # all_answers.extend(processed_answers)
             all_answers.extend(decoded)
         return all_answers
 
     def _generate_answer(self, prompt):
-        """Декомпозиция генерации одного ответа по prompt."""
         return self.batched_generate_answers([prompt], batch_size=1)[0]
 
     def generate_with_contexts(
@@ -187,7 +199,6 @@ class RagPipeline:
             return ["[Нет релевантных контекстов]"], []
         max_score = hits[0]["score"]
         adaptive_threshold = max(soft_threshold, max_score * 0.15)
-        # Сбор prompt-ов
         prompt_tuples = []
         for hit in hits:
             if hit["score"] < adaptive_threshold:
@@ -198,7 +209,6 @@ class RagPipeline:
             prompt_tuples.append((prompt, ctx, hit["score"]))
         if not prompt_tuples:
             return ["[Нет релевантных контекстов]"], []
-        # Батчевая генерация
         prompts = [pt[0] for pt in prompt_tuples]
         answers = self.batched_generate_answers(prompts, batch_size=batch_gen_size)
         seen_answers = set()

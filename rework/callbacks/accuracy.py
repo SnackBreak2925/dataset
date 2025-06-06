@@ -13,6 +13,9 @@ from sacrebleu.metrics import CHRF
 import Levenshtein
 import csv
 import os
+import numpy as np
+from helpers.cleaner import postprocess_answer
+
 
 try:
     nltk.data.find("corpora/wordnet")
@@ -100,6 +103,10 @@ def compute_masked_accuracy(logits, labels):
     return correct / total if total > 0 else 0.0
 
 
+def clean_for_decode(arr, vocab_size):
+    return [int(t) for t in arr if 0 <= int(t) < vocab_size]
+
+
 class AccuracyCallback(TrainerCallback):
     def __init__(self, tokenizer, init_timestamp, model_name, raw_test_data=None):
         self.tokenizer = tokenizer
@@ -152,21 +159,48 @@ class AccuracyCallback(TrainerCallback):
                 masked_acc = compute_masked_accuracy(logits, label_ids)
                 masked_accs.append(masked_acc)
 
-                gen_outputs = model.generate(
-                    input_ids,
-                    attention_mask=attention_mask,
-                    max_length=64,
-                    num_beams=num_beams,
-                    num_return_sequences=num_beams,
-                    early_stopping=True,
-                )
+                try:
+                    gen_outputs = model.generate(
+                        input_ids,
+                        attention_mask=attention_mask,
+                        max_length=64,
+                        num_beams=num_beams,
+                        num_return_sequences=num_beams,
+                    )
+                except Exception:
+                    gen_outputs = model.generate(
+                        input_ids,
+                        max_new_tokens=128,
+                        attention_mask=attention_mask,
+                        num_beams=num_beams,
+                        num_return_sequences=num_beams,
+                    )
+
                 batch_size = input_ids.shape[0]
-                decoded_labels = self.tokenizer.batch_decode(
-                    label_ids, skip_special_tokens=True
-                )
-                decoded_preds = self.tokenizer.batch_decode(
-                    gen_outputs, skip_special_tokens=True
-                )
+                vocab_size = len(self.tokenizer)
+
+                if isinstance(label_ids, torch.Tensor):
+                    labels_np = label_ids.cpu().numpy()
+                else:
+                    labels_np = np.array(label_ids)
+
+                safe_labels = [clean_for_decode(seq, vocab_size) for seq in labels_np]
+
+                if isinstance(gen_outputs, torch.Tensor):
+                    gen_np = gen_outputs.cpu().numpy()
+                else:
+                    gen_np = np.array(gen_outputs)
+
+                safe_preds = [clean_for_decode(seq, vocab_size) for seq in gen_np]
+
+                decoded_labels = [
+                    postprocess_answer(lbl)
+                    for lbl in self.tokenizer.batch_decode(safe_labels, skip_special_tokens=True)
+                ]
+                decoded_preds = [
+                    postprocess_answer(pred)
+                    for pred in self.tokenizer.batch_decode(safe_preds, skip_special_tokens=True)
+                ]
 
                 for i in range(batch_size):
                     ref = decoded_labels[i]
@@ -218,28 +252,22 @@ class AccuracyCallback(TrainerCallback):
                     batch_start : batch_start + BATCH_SIZE
                 ]
 
-                # 1. Получаем все вопросы батчем
                 questions = [ex["ticket_message"] for ex in batch_examples]
-                # 2. Получаем категории батчем (можно доработать, если категорий немного — сейчас пусть будет одна)
-                # Если у всех batch_examples одна категория:
                 category = self.rag_pipe.auto_detect_category(questions[0])
                 if not category:
-                    # если не определено — просто заполни всю batch
                     for ref in batch_labels:
                         rag_beams.append(["[Категория не определена]"] * TOP_K)
                         rag_refs.append([ref] * TOP_K)
                     val_bar.update(len(batch_examples))
                     continue
 
-                # 3. Батчевый поиск топ-контекстов для всех вопросов
                 all_hits = self.rag_pipe.batch_retrieve_contexts(
                     category, questions, top_k=TOP_K
                 )
 
-                # 4. Формируем все prompt-ы для генерации сразу для всего батча
                 prompts = []
-                prompt_map = []  # (question_idx, ref, ctx, score)
-                adaptive_threshold = 0.1  # Можно сделать динамическим, если хочется
+                prompt_map = []
+                adaptive_threshold = 0.1
 
                 for q_idx, (hits, ref) in enumerate(zip(all_hits, batch_labels)):
                     cnt = 0
@@ -257,7 +285,6 @@ class AccuracyCallback(TrainerCallback):
                         prompts.append(prompt)
                         prompt_map.append((q_idx, ref, ctx, hit["score"]))
                         cnt += 1
-                    # если не найдено ничего — fallback
                     if cnt == 0:
                         rag_beams.append(["[Нет релевантных контекстов]"] * TOP_K)
                         rag_refs.append([ref] * TOP_K)
@@ -265,18 +292,15 @@ class AccuracyCallback(TrainerCallback):
                     val_bar.update(len(batch_examples))
                     continue
 
-                # 5. Батчевый inference!
                 answers = self.rag_pipe.batched_generate_answers(
                     prompts, batch_size=BATCH_SIZE
                 )
 
-                # 6. Собираем ответы по каждому вопросу batch
                 from collections import defaultdict
 
                 responses_by_question = defaultdict(list)
                 for (q_idx, ref, ctx, score), ans in zip(prompt_map, answers):
                     responses_by_question[q_idx].append(ans)
-                # Если меньше TOP_K — паддинг
                 for q_idx, ref in enumerate(batch_labels):
                     beams = responses_by_question.get(q_idx, [])
                     if len(beams) < TOP_K:

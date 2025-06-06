@@ -5,10 +5,10 @@ if __name__ == "__main__":
         model_name="cointegrated/rut5-base",
         dataset_path="dialogue_dataset.json",
         output_dir="./rut5base-finetuned",
-        freeze_encoder_layers=2,
-        freeze_decoder_layers=4,
+        unfreeze_encoder_layers=2,
+        unfreeze_decoder_layers=4,
         trainer_args={
-            "num_train_epochs": 20,
+            "num_train_epochs": 100,
             "learning_rate": 4e-5,
         },
     )
