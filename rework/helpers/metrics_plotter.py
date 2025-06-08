@@ -136,11 +136,10 @@ class MetricsPlotter:
                 y = list(map(lambda x: x * 100, y))
             metric_title = TRANSLATE.get(metric)
             plt.plot(x, y, label=metric_title)
-            plt.title(metric)
-            plt.xlabel(x_axis.capitalize())
+            plt.title(metric_title)
+            plt.xlabel("Эпоха")
             plt.ylabel(metric_title)
             plt.grid(True)
-            plt.legend()
             plt.xlim(left=0, right=max(x))
             plt.xticks(range(0, max(x) + 1, max(x) // 20))
             if metric in PERCENT_METRICS:
