@@ -38,6 +38,30 @@ PERCENT_METRICS = {
 }
 
 
+TRANSLATE = {
+    "accuracy": "Классическая точность",
+    "masked_accuracy": "Маскированная точность",
+    "rouge1": "ROUGE-1",
+    "rougeL": "ROUGE-L",
+    "bleu": "BLEU",
+    "meteor": "METEOR",
+    "chrf": "Character F-score (chrF)",
+    "fuzzy": "Levenshtein ratio (Fuzzy)",
+    "len_ratio": "Cоотношение длин",
+    "bertscore_f1": "BERTScore F1",
+    "semantic_similarity": "Косинусное сходство предложений",
+    "rag_rouge1": "RAG ROUGE-1",
+    "rag_rougeL": "RAG ROUGE-L",
+    "rag_bleu": "RAG BLEU",
+    "rag_meteor": "RAG METEOR",
+    "rag_chrf": "RAG Character F-score (chrF)",
+    "rag_fuzzy": "RAG Levenshtein ratio (Fuzzy)",
+    "rag_len_ratio": "RAG Cоотношение длин",
+    "rag_bertscore_f1": "RAG BERTScore F1",
+    "rag_semantic_similarity": "RAG Косинусное сходство предложений",
+}
+
+
 class MetricsPlotter:
     def __init__(self, logs_dir="logs", base_out_dir="train_results"):
         self.logs_dir = logs_dir
@@ -80,9 +104,8 @@ class MetricsPlotter:
         model_name=None,
         init_timestamp=None,
         metrics=None,
-        x_axis="epoch",
+        x_axis="Эпоха",
     ):
-        # Определение пути к csv, если не задан
         if not csv_path and model_name and init_timestamp:
             csv_path = self.find_csv(model_name, init_timestamp)
         if not csv_path:
@@ -90,16 +113,13 @@ class MetricsPlotter:
                 "Either csv_path or (model_name and init_timestamp) must be provided"
             )
         df = pd.read_csv(csv_path)
-        # Какие есть метрики
         all_metrics = set(df.columns) - SERVICE_COLUMNS
         if metrics is None:
             metrics = list(all_metrics)
-        # Для единообразия названия и папка
         model_name = model_name or "model"
         init_timestamp = str(init_timestamp or "ts")
         out_dir = os.path.join(self.base_out_dir, f"{model_name}-{init_timestamp}")
         os.makedirs(out_dir, exist_ok=True)
-        # Масштабы по X и Y (от 0 до max по каждому)
         if x_axis not in df.columns:
             raise ValueError(
                 f"x_axis '{x_axis}' not found in CSV columns. Available: {list(df.columns)}"
@@ -114,10 +134,11 @@ class MetricsPlotter:
             y = list(df[metric])
             if metric in PERCENT_METRICS:
                 y = list(map(lambda x: x * 100, y))
-            plt.plot(x, y, label=metric)
+            metric_title = TRANSLATE.get(metric)
+            plt.plot(x, y, label=metric_title)
             plt.title(metric)
             plt.xlabel(x_axis.capitalize())
-            plt.ylabel(metric)
+            plt.ylabel(metric_title)
             plt.grid(True)
             plt.legend()
             plt.xlim(left=0, right=max(x))
@@ -136,7 +157,6 @@ class MetricsPlotter:
             print(f"✅ Сохранён график: {out_file}")
 
 
-# CLI
 if __name__ == "__main__":
     import argparse
 
