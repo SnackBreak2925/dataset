@@ -3,10 +3,16 @@ import json
 import logging
 import re
 import torch
-from transformers import T5Tokenizer, T5ForConditionalGeneration
+from transformers import (
+    T5Tokenizer,
+    T5ForConditionalGeneration,
+    AutoConfig,
+    AutoTokenizer,
+    AutoModelForCausalLM,
+)
 from sentence_transformers import SentenceTransformer, util
 
-from helpers.cleaner import postprocess_answer
+from rework.helpers.cleaner import postprocess_answer
 
 
 class RagPipeline:
@@ -61,7 +67,6 @@ class RagPipeline:
         return os.path.join(output_dir, latest)
 
     def _load_kb_texts(self):
-        """Только читает тексты KB, без encode!"""
         category_kbs, category_names = {}, []
         for fn in os.listdir(self.kb_dir):
             if fn.endswith(".json"):
@@ -74,7 +79,6 @@ class RagPipeline:
         return category_kbs, category_names
 
     def _encode_kbs(self, category_kbs):
-        """Считает эмбеддинги для всех KB по категориям, с кэшем."""
         category_embeddings = {}
         for cat, texts in category_kbs.items():
             cache_file = os.path.join(self.kb_dir, f"{cat}_emb.pt")
@@ -90,12 +94,25 @@ class RagPipeline:
 
     def _load_model_and_tokenizer(self):
         if self._internal_model_path:
-            self.model = (
-                T5ForConditionalGeneration.from_pretrained(self._internal_model_path)
-                .eval()
-                .to(self.device)
-            )
-            self.tokenizer = T5Tokenizer.from_pretrained(self._internal_model_path)
+            config = AutoConfig.from_pretrained(self._internal_model_path)
+            if config.model_type == "t5":
+                self.model = (
+                    T5ForConditionalGeneration.from_pretrained(
+                        self._internal_model_path
+                    )
+                    .eval()
+                    .to(self.device)
+                )
+                self.tokenizer = T5Tokenizer.from_pretrained(self._internal_model_path)
+            else:
+                self.model = (
+                    AutoModelForCausalLM.from_pretrained(self._internal_model_path)
+                    .eval()
+                    .to(self.device)
+                )
+                self.tokenizer = AutoTokenizer.from_pretrained(
+                    self._internal_model_path
+                )
 
     def refresh_checkpoint(self):
         if self._external_model is not None and self._external_tokenizer is not None:
@@ -146,8 +163,12 @@ class RagPipeline:
                 truncation=True,
                 max_length=256,
             ).input_ids.to(self.device)
+            config = AutoConfig.from_pretrained(self.model.config.name_or_path)
+            is_t5 = config.model_type == "t5"
+
+            attention_mask = (input_ids != self.tokenizer.pad_token_id).long()
             with torch.no_grad():
-                try:
+                if is_t5:
                     outputs = self.model.generate(
                         input_ids,
                         max_length=max_length,
@@ -156,19 +177,20 @@ class RagPipeline:
                         top_p=0.95,
                         num_return_sequences=1,
                     )
-                except Exception:
+                else:
                     outputs = self.model.generate(
                         input_ids,
+                        attention_mask=attention_mask,
                         max_new_tokens=128,
                         do_sample=True,
                         top_k=50,
                         top_p=0.95,
                         num_return_sequences=1,
+                        pad_token_id=self.tokenizer.pad_token_id,
                     )
             decoded = self.tokenizer.batch_decode(outputs, skip_special_tokens=True)
-            # processed_answers = [postprocess_answer(ans) for ans in decoded]
-            # all_answers.extend(processed_answers)
-            all_answers.extend(decoded)
+            processed_answers = [postprocess_answer(ans) for ans in decoded]
+            all_answers.extend(processed_answers)
         return all_answers
 
     def _generate_answer(self, prompt):
@@ -222,7 +244,6 @@ class RagPipeline:
         return responses, results
 
     def batch_retrieve_contexts(self, category, questions, top_k=5):
-        """Батчевый поиск топ-контекстов для группы вопросов."""
         emb = self.category_embeddings[category]
         q_embs = self.retriever.encode(
             questions, batch_size=32, convert_to_tensor=True, show_progress_bar=False

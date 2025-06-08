@@ -6,6 +6,7 @@ from callbacks.log import LogCallback
 from rework.callbacks.accuracy import AccuracyCallback
 
 from helpers.metrics_plotter import MetricsPlotter
+from helpers.dual_logger import DualLogger
 
 
 class FinetunerMixin:
@@ -14,6 +15,9 @@ class FinetunerMixin:
 
     def __init__(self, *args, **kwargs):
         self.init_timestamp = int(time.time())
+        import sys
+
+        sys.stdout = DualLogger(self.model_short_name(), self.init_timestamp)
         super().__init__(*args, **kwargs)
 
     def model_short_name(self):

@@ -1,0 +1,17 @@
+==> Evaluate BEFORE training (zero epoch baseline)...
+====================================================================================================
+[Входной текст]: Категория: Веб-ресурсы ТУСУР
+Тема: Как проверяет система плагиат?
+Пользователь: Библиографический список входит в проверку плагиата? Курсовая на 30 страниц должна содержать 50 источников, а это уже как минимум 7 страниц плагиата. Одновременно с тем, что плагиат курсовой не менее 70 процентов должен быть.
+Оператор: 
+[Промт]: Категория: Веб-ресурсы ТУСУР
+Тема: Как проверяет система плагиат?
+Пользователь: Библиографический список входит в проверку плагиата? Курсовая на 30 страниц должна содержать 50 источников, а это уже как минимум 7 страниц плагиата. Одновременно с тем, что плагиат курсовой не менее 70 процентов должен быть.
+Оператор: 
+[Эталонный ответ]: Здравствуйте! Вы обратились в техническую поддержку информационных систем ТУСУРа. Система Антиплагиат.ВУЗ является внешней системой ( [URL] ). Можете попробовать найти информацию о принципах работы на соответствующем сайте проекта.
+[Beam 1]: url: url: url: url: url: url: url: url: url: url: url: url: url: url: url: url: url: url: url: url: url: url: url: url: url: url: url: url: url: url: url: url:
+[Beam 2]: url: url: url: url: url: url: url: url: url: url: url: url: url: url: url: url: url: url: url: url: url: url: url: url: url: url: url: url: url: url: url: url:
+[Beam 3]: url: url: url: url: url: url: url: url: url: url: url: url: url: url: url: url: url: url: url: url: url: url: url: url: url: url: url: url: url: url: url:  url:
+[Beam 4]: url: url: url: url: url: url: url: url: url: url: url: url: url: url: url: url: url: url: url: url: url: url: url: url: url: url: url:  url: url: url: url: url:
+[Beam 5]: url: url: url: url: url: url: url: url: url: url: url: url: url: url: url: url: url: url: url: url: url: url: url: url: url: url: url: url: url:  url: url: url:
+****************************************************************************************************

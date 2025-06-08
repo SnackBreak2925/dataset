@@ -37,6 +37,8 @@ class CausalLMFineTuner(FinetunerMixin):
         self.trainer_args = trainer_args or {}
         self.kwargs = kwargs
 
+        self.tokenizer_kwargs.update({"padding_side": "left"})
+
         super().__init__()
 
     def preprocess(self, example):

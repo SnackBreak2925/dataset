@@ -1,6 +1,6 @@
 import torch
 from sklearn.metrics import accuracy_score
-from transformers import TrainerCallback
+from transformers import TrainerCallback, AutoConfig
 from nltk.translate.bleu_score import sentence_bleu, SmoothingFunction
 from rouge_score import rouge_scorer
 from tqdm import tqdm
@@ -159,7 +159,11 @@ class AccuracyCallback(TrainerCallback):
                 masked_acc = compute_masked_accuracy(logits, label_ids)
                 masked_accs.append(masked_acc)
 
-                try:
+                config = AutoConfig.from_pretrained(model.config.name_or_path)
+                is_t5 = config.model_type == "t5"
+
+                attention_mask = (input_ids != self.tokenizer.pad_token_id).long()
+                if is_t5:
                     gen_outputs = model.generate(
                         input_ids,
                         attention_mask=attention_mask,
@@ -167,11 +171,12 @@ class AccuracyCallback(TrainerCallback):
                         num_beams=num_beams,
                         num_return_sequences=num_beams,
                     )
-                except Exception:
+                else:
                     gen_outputs = model.generate(
                         input_ids,
                         max_new_tokens=128,
                         attention_mask=attention_mask,
+                        pad_token_id=self.tokenizer.pad_token_id,
                         num_beams=num_beams,
                         num_return_sequences=num_beams,
                     )

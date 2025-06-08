@@ -1,4 +1,4 @@
-from transformers import TrainerCallback
+from transformers import TrainerCallback, AutoConfig
 from tqdm import tqdm
 from helpers.rag_pipeline import RagPipeline
 import nltk
@@ -31,19 +31,25 @@ class LogCallback(TrainerCallback):
             input_ids = self.tokenizer.encode(
                 prompt, return_tensors="pt", max_length=256, truncation=True
             ).to(model.device)
-            try:
+            config = AutoConfig.from_pretrained(model.config.name_or_path)
+            is_t5 = config.model_type == "t5"
+
+            attention_mask = (input_ids != self.tokenizer.pad_token_id).long()
+            if is_t5:
                 outputs = model.generate(
                     input_ids,
                     max_length=64,
                     num_beams=5,
                     num_return_sequences=5,
                 )
-            except Exception:
+            else:
                 outputs = model.generate(
                     input_ids,
+                    attention_mask=attention_mask,
                     max_new_tokens=128,
                     num_beams=5,
                     num_return_sequences=5,
+                    pad_token_id=self.tokenizer.eos_token_id,
                 )
             tqdm.write("=" * 100)
 
